@@ -1,0 +1,77 @@
+# ~/.config/ruff/ruff.toml
+# グローバル設定 兼 各リポジトリへコピーするマスター。
+# プロジェクト側に ruff.toml / [tool.ruff] があるとこのファイルはマージされず丸ごと無視されるため、
+# 個別リポジトリでは extend ではなくこのファイルをコピーして使う。
+
+line-length = 100
+indent-width = 4
+
+# requires-python を持たないディレクトリでの推定値。system python (3.9) ではなく
+# 日常的に使う homebrew/uv 側の世代に合わせる。
+target-version = "py313"
+
+extend-exclude = [".direnv", ".devenv", "vendor"]
+
+[lint]
+# ライブラリ非依存のルールはすべて有効化する。ALL に preview / deprecated / removed は含まれないため、
+# 廃止予定のルールが混ざることはない。ruff の更新で新ルールが自動的に増える点は許容する。
+select = ["ALL"]
+
+ignore = [
+  # 特定のライブラリ・フレームワークを使うときだけ意味を持つルール群
+  "AIR",  # Airflow
+  "DJ",   # Django
+  "FAST", # FastAPI
+  "NPY",  # NumPy
+  "PD",   # pandas。PD901 は df という変数名だけで発火する
+
+  # ruff format が衝突を警告する唯一のルール。quote-style や indent-style を
+  # 既定から変えると対象が増えるので、その際は ruff format の警告を再確認する。
+  "COM812",
+]
+
+# --fix で消えると情報が失われるものは自動修正の対象から外す
+unfixable = ["ERA001", "F401", "F841", "RUF100"]
+
+# 日本語の文章に含まれる全角記号を ASCII の打ち間違いと誤検出させない（RUF001-003 用）。
+# 記号そのものは許可し、キリル文字などの本物の混入検出は有効なまま残す。
+allowed-confusables = [
+  "（",
+  "）",
+  "：",
+  "；",
+  "，",
+  "！",
+  "？",
+  "－",
+  "～",
+  "＋",
+  "＝",
+  "／",
+  "＊",
+  "＃",
+  "％",
+  "＆",
+  "＠",
+  "　",
+]
+
+[lint.per-file-ignores]
+"**/test_*.py" = ["S101", "ANN", "ARG", "SLF001", "PLR2004", "D"]
+"**/tests/**/*.py" = ["S101", "ANN", "ARG", "SLF001", "PLR2004", "D"]
+"**/conftest.py" = ["S101", "ANN", "D"]
+"**/__init__.py" = ["F401"]
+"**/*.ipynb" = ["ANN", "D", "E402", "T20", "PLR2004"]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.isort]
+combine-as-imports = true
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
