@@ -6,7 +6,8 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from dit.core.config import DitConfig, RemoteConfig, default_init_config
+from dit.core.config import DitConfig, RemoteConfig, init_config
+from dit.core.errors import ConfigError
 from dit.core.hasher import hash_file
 from dit.core.index import IndexEntry, StatIndex, file_stat_tuple, stats_match
 from dit.core.pointer import Pointer, read_pointer, write_pointer
@@ -19,16 +20,20 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def dit_remote_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DIT_ACCESS_KEY", "testing")
+    monkeypatch.setenv("DIT_SECRET_KEY", "testing")
+    monkeypatch.setenv("DIT_ENDPOINT_URL", "https://s3.amazonaws.com")
+
+
 @pytest.fixture
 def git_repo(tmp_path: Path) -> Repo:
     root = tmp_path / "proj"
     root.mkdir()
     (root / ".git").mkdir()
     (root / ".dit").mkdir()
-    config = default_init_config(
-        remote_url="s3://test-bucket/md",
-        endpoint_url=None,
-    )
+    config = init_config(bucket="test-bucket", prefix="md")
     config.save(root / "dit.toml")
     return Repo(root=root)
 
@@ -97,7 +102,7 @@ def test_s3_remote_upload_download(tmp_path: Path) -> None:
     bucket = "test-bucket"
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket=bucket)
-    remote = S3Remote(RemoteConfig(url="s3://test-bucket/md"))
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
     local = tmp_path / "a.dcd"
     local.write_bytes(b"hello-md")
     digest = hash_file(local)
@@ -108,3 +113,18 @@ def test_s3_remote_upload_download(tmp_path: Path) -> None:
     remote.download(digest, out)
     assert out.read_bytes() == b"hello-md"
     assert digest in remote.list_hashes()
+
+
+def test_s3_remote_requires_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DIT_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("DIT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("DIT_ENDPOINT_URL", raising=False)
+    with pytest.raises(ConfigError, match="DIT_ACCESS_KEY"):
+        S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+
+
+def test_remote_config_requires_bucket_and_prefix() -> None:
+    with pytest.raises(ConfigError, match=r"\[remote\]\.bucket"):
+        DitConfig.from_dict({"remote": {"prefix": "md"}})
+    with pytest.raises(ConfigError, match=r"\[remote\]\.prefix"):
+        DitConfig.from_dict({"remote": {"bucket": "test-bucket"}})

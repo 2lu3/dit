@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import os
+from typing import TYPE_CHECKING, Any
 
 import boto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 from dit.core.config import S3_REQUEST_TIMEOUT_SEC, RemoteConfig
-from dit.core.errors import RemoteError
+from dit.core.errors import ConfigError, RemoteError
 from dit.core.hasher import strip_hash_prefix
 from dit.core.remote.base import Remote
 
@@ -21,6 +22,35 @@ MULTIPART_CHUNKSIZE_BYTES = 16 * 1024 * 1024
 MAX_CONCURRENCY = 4
 HASH_KEY_PART_COUNT = 2
 
+REQUIRED_ENV_VARS = (
+    "DIT_ACCESS_KEY",
+    "DIT_SECRET_KEY",
+    "DIT_ENDPOINT_URL",
+)
+
+
+def _require_env_vars() -> dict[str, str]:
+    missing = [name for name in REQUIRED_ENV_VARS if not os.environ.get(name)]
+    if missing:
+        msg = "required environment variables not set: " + ", ".join(missing)
+        raise ConfigError(msg)
+    return {name: os.environ[name] for name in REQUIRED_ENV_VARS}
+
+
+def _s3_client_kwargs() -> dict[str, Any]:
+    """Build boto3 S3 client kwargs from required DIT_* environment variables."""
+    env = _require_env_vars()
+    return {
+        "endpoint_url": env["DIT_ENDPOINT_URL"],
+        "aws_access_key_id": env["DIT_ACCESS_KEY"],
+        "aws_secret_access_key": env["DIT_SECRET_KEY"],
+        "config": BotoConfig(
+            connect_timeout=S3_REQUEST_TIMEOUT_SEC,
+            read_timeout=S3_REQUEST_TIMEOUT_SEC,
+            retries={"max_attempts": 3, "mode": "standard"},
+        ),
+    }
+
 
 class S3Remote(Remote):
     """S3 remote that stores objects under content-addressed keys."""
@@ -28,15 +58,7 @@ class S3Remote(Remote):
     def __init__(self, remote: RemoteConfig) -> None:
         """Create an S3 client for the given remote configuration."""
         self.remote = remote
-        self._client = boto3.client(
-            "s3",
-            endpoint_url=remote.endpoint_url,
-            config=BotoConfig(
-                connect_timeout=S3_REQUEST_TIMEOUT_SEC,
-                read_timeout=S3_REQUEST_TIMEOUT_SEC,
-                retries={"max_attempts": 3, "mode": "standard"},
-            ),
-        )
+        self._client = boto3.client("s3", **_s3_client_kwargs())
         self._transfer = boto3.s3.transfer.TransferConfig(
             multipart_threshold=MULTIPART_THRESHOLD_BYTES,
             multipart_chunksize=MULTIPART_CHUNKSIZE_BYTES,

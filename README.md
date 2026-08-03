@@ -16,15 +16,15 @@ pip install git+https://github.com/2lu3/dit.git
 # or: cd dit && uv sync
 
 cd /path/to/your-md-project
-dit init --remote-url s3://bucket/prefix --endpoint-url https://minio.example.com
+dit init --bucket my-bucket --prefix md-project
 ```
 
 `dit.toml` 例:
 
 ```toml
 [remote]
-url = "s3://bucket/prefix"
-endpoint_url = "https://minio.example.com"
+bucket = "my-bucket"
+prefix = "md-project"
 
 [track]
 patterns = [
@@ -36,7 +36,15 @@ patterns = [
 ]
 ```
 
-認証は環境変数 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`。
+認証と endpoint は環境変数で指定する（未設定だとエラー）。
+
+```bash
+export DIT_ACCESS_KEY=...
+export DIT_SECRET_KEY=...
+export DIT_ENDPOINT_URL=https://minio.example.com
+```
+
+`dit init` では `--bucket` と `--prefix` が必須。
 
 ## コマンド
 

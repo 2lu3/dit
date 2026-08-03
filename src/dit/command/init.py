@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import click
 
-from dit.core.config import default_init_config
+from dit.core.config import init_config
 from dit.core.errors import RepoError
 from dit.core.githook import install_hook
 from dit.core.repo import DIT_DIR_NAME, find_repo
 
 
 @click.command("init")
-@click.option("--remote-url", default=None, help="s3://bucket/prefix")
-@click.option("--endpoint-url", default=None, help="S3-compatible endpoint URL")
+@click.option("--bucket", required=True, help="S3 bucket name")
+@click.option("--prefix", required=True, help="Key prefix within the bucket")
 @click.option("--force-hook", is_flag=True, help="overwrite unmanaged pre-commit hook")
 def init_cmd(
-    remote_url: str | None,
-    endpoint_url: str | None,
+    bucket: str,
+    prefix: str,
     *,
     force_hook: bool,
 ) -> None:
@@ -29,7 +29,7 @@ def init_cmd(
     if repo.dit_toml.exists():
         click.echo(f"already initialized: {repo.dit_toml}")
     else:
-        config = default_init_config(remote_url=remote_url, endpoint_url=endpoint_url)
+        config = init_config(bucket=bucket, prefix=prefix)
         config.save(repo.dit_toml)
         click.echo(f"wrote {repo.dit_toml}")
 

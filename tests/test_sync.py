@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import boto3
+import pytest
 from moto import mock_aws
 
 from dit.core.add_service import run_add
-from dit.core.config import default_init_config
+from dit.core.config import init_config
 from dit.core.repo import Repo
 from dit.core.scope import Scope
 from dit.core.sync_service import SyncAction, run_sync
@@ -15,13 +16,20 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def dit_remote_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DIT_ACCESS_KEY", "testing")
+    monkeypatch.setenv("DIT_SECRET_KEY", "testing")
+    monkeypatch.setenv("DIT_ENDPOINT_URL", "https://s3.amazonaws.com")
+
+
 def _init_repo(tmp_path: Path) -> Repo:
     root = tmp_path / "proj"
     root.mkdir()
     (root / ".git").mkdir()
     (root / ".dit").mkdir()
     (root / ".dit" / ".gitignore").write_text("*\n", encoding="utf-8")
-    config = default_init_config(remote_url="s3://test-bucket/md")
+    config = init_config(bucket="test-bucket", prefix="md")
     config.save(root / "dit.toml")
     return Repo(root=root)
 
