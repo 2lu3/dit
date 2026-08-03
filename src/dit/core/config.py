@@ -5,7 +5,6 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 import tomli_w
 
@@ -30,28 +29,16 @@ S3_REQUEST_TIMEOUT_SEC = 60
 
 @dataclass(frozen=True)
 class RemoteConfig:
-    """Parsed remote storage URL and optional endpoint."""
+    """Remote storage bucket and key prefix."""
 
-    url: str
-    endpoint_url: str | None = None
+    bucket: str
+    prefix: str
 
-    @property
-    def bucket(self) -> str:
-        """Return the S3 bucket name from the remote URL."""
-        parsed = urlparse(self.url)
-        if parsed.scheme != "s3":
-            msg = f"unsupported remote scheme: {parsed.scheme!r} in {self.url}"
+    def __post_init__(self) -> None:
+        """Reject an empty bucket name."""
+        if not self.bucket:
+            msg = "remote bucket must not be empty"
             raise ConfigError(msg)
-        if not parsed.netloc:
-            msg = f"missing bucket in remote url: {self.url}"
-            raise ConfigError(msg)
-        return parsed.netloc
-
-    @property
-    def prefix(self) -> str:
-        """Return the key prefix from the remote URL path."""
-        parsed = urlparse(self.url)
-        return parsed.path.lstrip("/")
 
 
 @dataclass(frozen=True)
@@ -59,7 +46,9 @@ class DitConfig:
     """In-memory representation of dit.toml."""
 
     remote: RemoteConfig | None = None
-    track_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_TRACK_PATTERNS))
+    track_patterns: list[str] = field(
+        default_factory=lambda: list(DEFAULT_TRACK_PATTERNS)
+    )
 
     @classmethod
     def load(cls, path: Path) -> DitConfig:
@@ -78,12 +67,21 @@ class DitConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DitConfig:
         """Build configuration from a parsed TOML dictionary."""
-        remote_data = data.get("remote") or {}
+        remote_data = data.get("remote")
         remote: RemoteConfig | None = None
-        if remote_data.get("url"):
+        if remote_data is not None:
+            if not isinstance(remote_data, dict):
+                msg = "[remote] must be a table"
+                raise ConfigError(msg)
+            if "bucket" not in remote_data:
+                msg = "[remote].bucket is required"
+                raise ConfigError(msg)
+            if "prefix" not in remote_data:
+                msg = "[remote].prefix is required"
+                raise ConfigError(msg)
             remote = RemoteConfig(
-                url=str(remote_data["url"]),
-                endpoint_url=remote_data.get("endpoint_url"),
+                bucket=str(remote_data["bucket"]),
+                prefix=str(remote_data["prefix"]),
             )
         track = data.get("track") or {}
         patterns = track.get("patterns") or list(DEFAULT_TRACK_PATTERNS)
@@ -96,10 +94,10 @@ class DitConfig:
         """Serialize configuration to a TOML-ready dictionary."""
         result: dict[str, Any] = {"track": {"patterns": list(self.track_patterns)}}
         if self.remote is not None:
-            remote: dict[str, str] = {"url": self.remote.url}
-            if self.remote.endpoint_url:
-                remote["endpoint_url"] = self.remote.endpoint_url
-            result["remote"] = remote
+            result["remote"] = {
+                "bucket": self.remote.bucket,
+                "prefix": self.remote.prefix,
+            }
         return result
 
     def save(self, path: Path) -> None:
@@ -114,12 +112,9 @@ def load_config(repo: Repo) -> DitConfig:
     return DitConfig.load(repo.dit_toml)
 
 
-def default_init_config(
-    remote_url: str | None = None,
-    endpoint_url: str | None = None,
-) -> DitConfig:
-    """Build a default configuration for `dit init`."""
-    remote = None
-    if remote_url:
-        remote = RemoteConfig(url=remote_url, endpoint_url=endpoint_url)
-    return DitConfig(remote=remote, track_patterns=list(DEFAULT_TRACK_PATTERNS))
+def init_config(bucket: str, prefix: str) -> DitConfig:
+    """Build configuration for `dit init`."""
+    return DitConfig(
+        remote=RemoteConfig(bucket=bucket, prefix=prefix),
+        track_patterns=list(DEFAULT_TRACK_PATTERNS),
+    )
