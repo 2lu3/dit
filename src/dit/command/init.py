@@ -11,16 +11,16 @@ from dit.core.repo import DIT_DIR_NAME, find_repo
 
 
 @click.command("init")
-@click.option("--bucket", required=True, help="S3 bucket name")
-@click.option("--prefix", required=True, help="Key prefix within the bucket")
-@click.option("--force-hook", is_flag=True, help="overwrite unmanaged pre-commit hook")
+@click.option("--bucket", required=True, help="S3 バケット名")
+@click.option("--prefix", required=True, help="バケット内のキープレフィックス")
+@click.option("--force-hook", is_flag=True, help="管理外の pre-commit フックを上書きする")
 def init_cmd(
     bucket: str,
     prefix: str,
     *,
     force_hook: bool,
 ) -> None:
-    """Initialize dit.toml, .dit/, and the pre-commit hook."""
+    """dit.toml / .dit/ / pre-commit フックを初期化する."""
     repo = find_repo()
     if not (repo.root / ".git").exists():
         msg = f"not a git repository: {repo.root}"

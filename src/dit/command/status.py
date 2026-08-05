@@ -15,7 +15,18 @@ from dit.core.tracker import iter_pointer_files, iter_tracked_files
 
 @click.command("status")
 def status_cmd() -> None:
-    """Show tracked file status relative to pointers and scope."""
+    """ポインタと scope に対する追跡ファイルの状態を表示する.
+
+    状態記号:
+
+    \b
+      ?  実体はあるがポインタがない（未登録）
+      ↓  実体がなく、scope 内（要 pull）
+      .  実体がなく、scope 外
+      M  実体のハッシュがポインタと不一致（変更あり）
+      S  実体はあるが scope 外
+         問題なし（ポインタと一致し、scope 内）
+    """  # noqa: D301
     try:
         repo = require_initialized()
         config = load_config(repo)

@@ -14,7 +14,7 @@ from dit.command.transfer import pull_cmd, push_cmd, sync_cmd
 
 @click.group()
 def cli() -> None:
-    """MD-oriented large-file versioning."""
+    """MD 計算向けの大容量ファイル版管理."""
 
 
 def main() -> None:

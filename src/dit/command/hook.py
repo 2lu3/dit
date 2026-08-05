@@ -10,13 +10,13 @@ from dit.core.repo import find_repo
 
 @click.group("hook")
 def hook_group() -> None:
-    """Manage the dit pre-commit hook."""
+    """pre-commit フックを管理する."""
 
 
 @hook_group.command("install")
-@click.option("--force", is_flag=True)
+@click.option("--force", is_flag=True, help="管理外のフックを上書きする")
 def hook_install(*, force: bool) -> None:
-    """Install the dit pre-commit hook."""
+    """pre-commit フックをインストールする."""
     repo = find_repo()
     try:
         path = install_hook(repo.root, force=force)
@@ -27,7 +27,7 @@ def hook_install(*, force: bool) -> None:
 
 @hook_group.command("uninstall")
 def hook_uninstall() -> None:
-    """Uninstall the dit pre-commit hook."""
+    """pre-commit フックをアンインストールする."""
     repo = find_repo()
     try:
         removed = uninstall_hook(repo.root)
@@ -38,6 +38,6 @@ def hook_uninstall() -> None:
 
 @hook_group.command("status")
 def hook_status_cmd() -> None:
-    """Show whether the dit pre-commit hook is installed."""
+    """pre-commit フックの状態を表示する."""
     repo = find_repo()
     click.echo(hook_status(repo.root))
