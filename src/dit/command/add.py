@@ -9,10 +9,10 @@ from dit.core.repo import require_initialized
 
 
 @click.command("add")
-@click.option("--quiet", "-q", is_flag=True)
-@click.option("--prune", is_flag=True, help="remove pointers no longer matched by dit.toml")
+@click.option("--quiet", "-q", is_flag=True, help="詳細出力を抑える")
+@click.option("--prune", is_flag=True, help="dit.toml に一致しなくなったポインタを削除する")
 def add_cmd(*, quiet: bool, prune: bool) -> None:
-    """Create or update pointer files for tracked paths."""
+    """追跡パスのポインタを作成・更新する."""
     try:
         repo = require_initialized()
         count = run_add(repo, quiet=quiet, prune=prune)
