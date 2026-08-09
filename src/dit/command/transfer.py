@@ -20,7 +20,7 @@ def _print_results(results: list) -> int:
 @click.command("push")
 @click.option("--dry-run", is_flag=True, help="実行せずに予定だけ表示する")
 def push_cmd(*, dry_run: bool) -> None:
-    """ポインタが指すローカルオブジェクトをアップロードする."""
+    """Scope 内ポインタが指すローカルオブジェクトをアップロードする."""
     try:
         repo = require_initialized()
         results = run_push(repo, dry_run=dry_run)
@@ -53,7 +53,7 @@ def pull_cmd(*, dry_run: bool) -> None:
     help="git fetch --all --prune のあと、参照されないリモートオブジェクトを削除する",
 )
 def sync_cmd(*, dry_run: bool, prune_remote: bool) -> None:
-    """リモートとの同期と、scope 外ローカルの削除を行う."""
+    """Scope 内だけリモートと同期する."""
     try:
         repo = require_initialized()
         results = run_sync(repo, dry_run=dry_run, prune_remote=prune_remote)
