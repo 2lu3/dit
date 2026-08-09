@@ -37,7 +37,6 @@ class SyncAction(StrEnum):
     PUSH = "push"
     PULL = "pull"
     UPDATE_POINTER = "update_pointer"
-    DELETE_LOCAL = "delete_local"
     DELETE_REMOTE = "delete_remote"
     WARNING = "warning"
     ERROR = "error"
@@ -81,13 +80,16 @@ def require_remote(config: DitConfig) -> Remote:
 
 
 def run_push(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
-    """Upload local content missing from the remote."""
+    """Upload local content missing from the remote for in-scope paths."""
     config = load_config(repo)
     remote = require_remote(config)
+    scope = Scope(repo)
     results: list[SyncResult] = []
     with StatIndex(repo.index_db) as index:
         for pointer_path in iter_pointer_files(repo):
             pointer = read_pointer(pointer_path)
+            if not scope.contains(pointer.path):
+                continue
             data_path = repo.abs(pointer.path)
             if not data_path.is_file():
                 continue
@@ -158,6 +160,8 @@ def run_sync(
 
 
 def _sync_one(ctx: SyncCtx, item: SyncItem) -> list[SyncResult]:
+    if not ctx.scope.contains(item.rel):
+        return []
     has_data = item.data_path.is_file()
     if item.pointer is not None and has_data:
         return _sync_both(ctx, item)
@@ -196,16 +200,6 @@ def _sync_both(ctx: SyncCtx, item: SyncItem) -> list[SyncResult]:
         if not ctx.dry_run:
             ctx.remote.upload(item.data_path, active.hash)
             ctx.index.mark_pushed(item.rel, utc_now_iso())
-            remote_has = True
-
-    if not ctx.scope.contains(item.rel):
-        return results + _delete_local_if_safe(
-            ctx.remote,
-            item.rel,
-            item.data_path,
-            active.hash,
-            dry_run=ctx.dry_run,
-        )
 
     if not results:
         results.append(SyncResult(item.rel, SyncAction.OK, "in sync"))
@@ -241,43 +235,18 @@ def _resolve_hash_mismatch(
 
     if not ctx.remote.exists(pointer.hash):
         return [SyncResult(item.rel, SyncAction.ERROR, "pointer newer but remote missing")]
-    if ctx.scope.contains(item.rel):
-        if not ctx.dry_run:
-            ctx.remote.download(pointer.hash, item.data_path)
-        return [SyncResult(item.rel, SyncAction.PULL, "pointer newer")]
-    return _delete_local_if_safe(
-        ctx.remote,
-        item.rel,
-        item.data_path,
-        pointer.hash,
-        dry_run=ctx.dry_run,
-    )
+    if not ctx.dry_run:
+        ctx.remote.download(pointer.hash, item.data_path)
+    return [SyncResult(item.rel, SyncAction.PULL, "pointer newer")]
 
 
 def _sync_pointer_only(ctx: SyncCtx, item: SyncItem) -> list[SyncResult]:
     pointer = _require_pointer(item)
     if not ctx.remote.exists(pointer.hash):
         return [SyncResult(item.rel, SyncAction.ERROR, "file not found locally or remotely")]
-    if not ctx.scope.contains(item.rel):
-        return [SyncResult(item.rel, SyncAction.OK, "out of scope; no local copy")]
     if not ctx.dry_run:
         ctx.remote.download(pointer.hash, item.data_path)
     return [SyncResult(item.rel, SyncAction.PULL, "download")]
-
-
-def _delete_local_if_safe(
-    remote: Remote,
-    rel: str,
-    data_path: Path,
-    content_hash: str,
-    *,
-    dry_run: bool,
-) -> list[SyncResult]:
-    if not remote.exists(content_hash):
-        return [SyncResult(rel, SyncAction.ERROR, "cannot delete local; remote missing")]
-    if not dry_run and data_path.is_file():
-        data_path.unlink()
-    return [SyncResult(rel, SyncAction.DELETE_LOCAL, "out of scope")]
 
 
 def _prune_remote_orphans(

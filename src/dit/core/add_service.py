@@ -14,6 +14,7 @@ from dit.core.content import resolve_content_hash, write_pointer_for_file
 from dit.core.errors import RepoError
 from dit.core.index import StatIndex
 from dit.core.pointer import read_pointer
+from dit.core.scope import Scope
 from dit.core.tracker import iter_pointer_files, iter_tracked_files
 
 if TYPE_CHECKING:
@@ -21,11 +22,12 @@ if TYPE_CHECKING:
 
 
 def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
-    """Write or update pointer files for tracked paths."""
+    """Write or update pointer files for in-scope tracked paths."""
     config = load_config(repo)
+    scope = Scope(repo)
     changed = 0
     with StatIndex(repo.index_db) as index:
-        tracked = iter_tracked_files(repo, config)
+        tracked = [p for p in iter_tracked_files(repo, config) if scope.contains(repo.rel(p))]
         tracked_rels = {repo.rel(p) for p in tracked}
         for data_path in tracked:
             digest = resolve_content_hash(repo, index, data_path)
@@ -42,16 +44,24 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
                 if not quiet:
                     logger.info(f"add {pointer.path}")
         if prune:
-            changed += _prune_orphaned_pointers(repo, tracked_rels, quiet=quiet)
+            changed += _prune_orphaned_pointers(repo, scope, tracked_rels, quiet=quiet)
     return changed
 
 
-def _prune_orphaned_pointers(repo: Repo, tracked_rels: set[str], *, quiet: bool) -> int:
+def _prune_orphaned_pointers(
+    repo: Repo,
+    scope: Scope,
+    tracked_rels: set[str],
+    *,
+    quiet: bool,
+) -> int:
     removed = 0
     for pointer_path in iter_pointer_files(repo):
         try:
             pointer = read_pointer(pointer_path)
         except ValueError:
+            continue
+        if not scope.contains(pointer.path):
             continue
         if pointer.path in tracked_rels:
             continue

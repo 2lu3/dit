@@ -7,7 +7,7 @@ MD 計算向けの大容量ファイル版管理ツール（DVC 非依存）。
 - 管理対象はリポジトリルートの `dit.toml` で宣言する（`.gitignore` と同じ書式）
 - `git commit` 時の pre-commit フックが `dit add` を自動実行し、ポインタ `*.dit` をステージする
 - ローカルキャッシュは持たない。ワークツリーの実体 + リモートが真実
-- 日常操作は `dit sync`（① 一致確認と新しい方の採用 ② scope に合わせてローカルを置く/消す）
+- 日常操作は `dit sync`（scope 内だけ一致確認と置く/pull。scope 外は触らない）
 
 ## セットアップ
 
@@ -51,16 +51,16 @@ export DIT_ENDPOINT_URL=https://minio.example.com
 | コマンド | 役割 |
 |---------|------|
 | `dit init` | `dit.toml` / `.dit/` / pre-commit フックを作成 |
-| `dit add` | `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
+| `dit add` | scope 内で `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
 | `dit status` | 変更・未追跡・要 pull などを表示 |
-| `dit push` / `dit pull` | 低レベル転送 |
-| `dit sync` | 日常の同期。`--dry-run` / `--prune-remote` |
+| `dit push` / `dit pull` | scope 内の低レベル転送 |
+| `dit sync` | 日常の同期（scope 内のみ）。`--dry-run` / `--prune-remote` |
 | `dit scope add\|remove\|list` | このマシンで実体を持つディレクトリ |
 | `dit hook install\|uninstall\|status` | pre-commit フック管理 |
 
 ## sync の方針
 
-1. `.dcd` と `.dit` が両方ある場合は必ず一致確認。不一致なら mtime で新しい方を採用し、必要なら push / pull。`.dit` も合わせる
-2. scope 内ならローカルに実体を置く。scope 外なら（リモート確認後）ローカルを消す
+1. scope 内で `.dcd` と `.dit` が両方ある場合は一致確認。不一致なら mtime で新しい方を採用し、必要なら push / pull。`.dit` も合わせる
+2. scope 内ならローカルに実体を置く（欠落時は pull）。scope 外は無視する（削除もアップロードもしない）
 
 孤児リモート削除は `dit sync --prune-remote` のときだけ。実行前に `git fetch --all --prune` を自動実行する。

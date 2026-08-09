@@ -10,9 +10,9 @@ from dit.core.repo import require_initialized
 
 @click.command("add")
 @click.option("--quiet", "-q", is_flag=True, help="詳細出力を抑える")
-@click.option("--prune", is_flag=True, help="dit.toml に一致しなくなったポインタを削除する")
+@click.option("--prune", is_flag=True, help="scope 内の不要ポインタを削除する")
 def add_cmd(*, quiet: bool, prune: bool) -> None:
-    """追跡パスのポインタを作成・更新する."""
+    """Scope 内の追跡パスのポインタを作成・更新する."""
     try:
         repo = require_initialized()
         count = run_add(repo, quiet=quiet, prune=prune)
