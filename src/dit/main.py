@@ -14,7 +14,24 @@ from dit.command.transfer import pull_cmd, push_cmd, sync_cmd
 
 @click.group()
 def cli() -> None:
-    """MD 計算向けの大容量ファイル版管理."""
+    """MD 計算向けの大容量ファイル版管理.
+
+    用語:
+
+    \b
+      ポインタ (*.dit)  Git に載るメタデータ（hash / size）
+      実体              大容量ファイル本体（Git には入れない）
+      scope             このマシンで実体を置くディレクトリ
+
+    ポインタ・実体・scope と sync の動き:
+
+    \b
+      ポインタ+実体 / scope 内   一致確認。必要なら push / pull
+      ポインタ+実体 / scope 外   一致確認のあと、リモートにあれば実体を削除
+      ポインタのみ / scope 内    リモートから pull
+      ポインタのみ / scope 外    そのまま（ローカルに実体なし）
+      実体のみ                   警告（ポインタ未作成）
+    """  # noqa: D301
 
 
 def main() -> None:
