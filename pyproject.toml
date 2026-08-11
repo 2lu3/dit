@@ -1,6 +1,6 @@
 [project]
 name = "dit"
-version = "0.2.6"
+version = "0.2.7"
 description = "MD-oriented large-file versioning (DVC-independent)"
 readme = "README.md"
 requires-python = ">=3.10"
