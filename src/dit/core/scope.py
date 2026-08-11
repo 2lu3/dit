@@ -1,4 +1,4 @@
-"""Directory scope persisted under .dit/scope.toml."""
+""".dit/scope.toml に永続化されるディレクトリ scope."""
 
 from __future__ import annotations
 
@@ -16,21 +16,21 @@ if TYPE_CHECKING:
 
 
 class Scope:
-    """Managed set of directories tracked by dit."""
+    """dit が管理するディレクトリ集合."""
 
     def __init__(self, repo: Repo) -> None:
-        """Load scope state for a repository."""
+        """リポジトリの scope 状態を読み込む."""
         self.repo = repo
         self._directories: set[str] = set()
         self._load()
 
     @property
     def directories(self) -> set[str]:
-        """Return a copy of scoped directory paths."""
+        """Scope 内ディレクトリパスのコピーを返す."""
         return set(self._directories)
 
     def add(self, dir_path: Path) -> str:
-        """Add a directory to scope and persist."""
+        """ディレクトリを scope に追加して永続化する."""
         if not dir_path.is_dir():
             msg = f"{dir_path} is not a directory"
             raise ConfigError(msg)
@@ -40,7 +40,7 @@ class Scope:
         return rel
 
     def remove(self, dir_path: Path | str) -> str:
-        """Remove a directory from scope and persist."""
+        """ディレクトリを scope から削除して永続化する."""
         rel = dir_path if isinstance(dir_path, str) else self.repo.rel(Path(dir_path))
         if rel not in self._directories:
             msg = f"{rel} is not in scope: {natsorted(self._directories)}"
@@ -50,11 +50,11 @@ class Scope:
         return rel
 
     def list(self) -> list[str]:
-        """Return scoped directories in natural sort order."""
+        """自然順ソートした scope ディレクトリを返す."""
         return natsorted(self._directories)
 
     def contains(self, rel_path: str) -> bool:
-        """Return whether a relative path falls under scope."""
+        """相対パスが scope 内かを返す."""
         if not self._directories:
             return False
         for directory in self._directories:

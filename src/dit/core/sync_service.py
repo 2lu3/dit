@@ -1,4 +1,4 @@
-"""Push, pull, and sync orchestration."""
+"""push / pull / sync のオーケストレーション."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ GIT_SHOW_TIMEOUT_S = 60
 
 
 class SyncAction(StrEnum):
-    """Outcome label for one sync path."""
+    """同期対象 1 パスの結果ラベル."""
 
     OK = "ok"
     PUSH = "push"
@@ -44,7 +44,7 @@ class SyncAction(StrEnum):
 
 @dataclass
 class SyncResult:
-    """Result row for a sync operation."""
+    """同期操作の結果 1 行."""
 
     path: str
     action: SyncAction
@@ -53,7 +53,7 @@ class SyncResult:
 
 @dataclass
 class SyncCtx:
-    """Shared inputs for sync helpers."""
+    """同期ヘルパー共有の入力."""
 
     repo: Repo
     index: StatIndex
@@ -64,7 +64,7 @@ class SyncCtx:
 
 @dataclass
 class SyncItem:
-    """One tracked or pointer path under consideration."""
+    """処理対象の追跡パスまたはポインタパス."""
 
     rel: str
     data_path: Path
@@ -72,7 +72,7 @@ class SyncItem:
 
 
 def require_remote(config: DitConfig) -> Remote:
-    """Open the configured remote or raise if missing."""
+    """設定されたリモートを開く。未設定なら例外を送出する."""
     if config.remote is None:
         msg = "remote is not configured in dit.toml"
         raise ConfigError(msg)
@@ -80,7 +80,7 @@ def require_remote(config: DitConfig) -> Remote:
 
 
 def run_push(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
-    """Upload local content missing from the remote for in-scope paths."""
+    """Scope 内でリモートに無いローカル実体をアップロードする."""
     config = load_config(repo)
     remote = require_remote(config)
     scope = Scope(repo)
@@ -103,7 +103,7 @@ def run_push(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
 
 
 def run_pull(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
-    """Download remote content for in-scope missing local files."""
+    """Scope 内で欠落しているローカルファイルへリモート実体をダウンロードする."""
     config = load_config(repo)
     remote = require_remote(config)
     scope = Scope(repo)
@@ -127,7 +127,7 @@ def run_sync(
     dry_run: bool = False,
     prune_remote: bool = False,
 ) -> list[SyncResult]:
-    """Reconcile local files, pointers, and remote objects."""
+    """ローカル実体・ポインタ・リモートオブジェクトを突き合わせる."""
     config = load_config(repo)
     remote = require_remote(config)
     scope = Scope(repo)
@@ -207,7 +207,7 @@ def _sync_both(ctx: SyncCtx, item: SyncItem) -> list[SyncResult]:
 
 
 def has_local_needing_push(data_path: Path, *, remote_has: bool) -> bool:
-    """Return True when local data exists and remote lacks the object."""
+    """ローカル実体がありリモートにオブジェクトが無いとき True を返す."""
     return data_path.is_file() and not remote_has
 
 

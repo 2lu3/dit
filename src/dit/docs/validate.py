@@ -1,4 +1,4 @@
-"""Validate generated documentation before publishing it."""
+"""公開前に生成ドキュメントを検証する."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ LINK = re.compile(r"\[[^]]+\]\(([^)]+)\)")
 
 
 class DocsValidationError(ValueError):
-    """Raised when generated documentation is incomplete or invalid."""
+    """生成ドキュメントが不完全または不正なときに送出する."""
 
 
 def validate_docs(root: Path | None = None) -> None:
-    """Validate required pages, headings, and local Markdown links."""
+    """必須ページ・見出し・ローカル Markdown リンクを検証する."""
     root = root or project_root()
     docs = root / "docs"
     required = [docs / "index.md", docs / "source" / "guide-policy.md"]
@@ -61,5 +61,5 @@ def validate_docs(root: Path | None = None) -> None:
 
 
 def main() -> None:
-    """CLI entry point for documentation validation."""
+    """ドキュメント検証の CLI エントリポイント."""
     validate_docs()

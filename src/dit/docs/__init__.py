@@ -1,1 +1,1 @@
-"""Documentation generation tools."""
+"""ドキュメント生成ツール."""

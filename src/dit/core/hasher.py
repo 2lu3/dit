@@ -1,4 +1,4 @@
-"""Content hashing helpers."""
+"""コンテンツハッシュの補助."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ HASH_CHUNK_SIZE = 1024 * 1024
 
 
 def hash_file(path: Path) -> str:
-    """Return blake3 content hash for a file."""
+    """ファイルの blake3 コンテンツハッシュを返す."""
     hasher = blake3.blake3()
     try:
         with path.open("rb") as f:
@@ -32,7 +32,7 @@ def hash_file(path: Path) -> str:
 
 
 def strip_hash_prefix(value: str) -> str:
-    """Strip the blake3: prefix when present."""
+    """あれば blake3: プレフィックスを取り除く."""
     if value.startswith(HASH_PREFIX):
         return value[len(HASH_PREFIX) :]
     return value

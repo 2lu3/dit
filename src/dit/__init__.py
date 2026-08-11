@@ -1,1 +1,1 @@
-"""MD-oriented large-file versioning toolkit."""
+"""MD 計算向けの大容量ファイル版管理ツールキット."""
