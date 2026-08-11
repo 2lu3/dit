@@ -64,3 +64,21 @@ export DIT_ENDPOINT_URL=https://minio.example.com
 2. scope 内ならローカルに実体を置く（欠落時は pull）。scope 外は無視する（削除もアップロードもしない）
 
 孤児リモート削除は `dit sync --prune-remote` のときだけ。実行前に `git fetch --all --prune` を自動実行する。
+
+## ドキュメント開発
+
+CLI ReferenceはClick定義から生成する。
+
+```bash
+uv run docs-reference
+uv run docs-validate
+uv run zensical serve
+```
+
+User Guideを含む全生成にはOpenAI APIキーが必要。
+
+```bash
+OPENAI_API_KEY=... uv run docs-generate
+```
+
+CLI関連のpull requestではGitHub Actionsが全生成し、生成結果を同じブランチへコミットする。リポジトリには `OPENAI_API_KEY` と、対象リポジトリのContentsにwrite権限を持つfine-grained token `DOCS_BOT_TOKEN` をActions secretとして設定する。これらのsecretを利用できるのは、信頼された同一リポジトリ内のブランチに限定する。GitHub PagesのSourceはGitHub Actionsに設定する。

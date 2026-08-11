@@ -12,8 +12,7 @@ from dit.command.status import status_cmd
 from dit.command.transfer import pull_cmd, push_cmd, sync_cmd
 
 
-@click.group()
-def cli() -> None:
+def _cli_callback() -> None:
     """MD 計算向けの大容量ファイル版管理.
 
     用語:
@@ -35,16 +34,25 @@ def cli() -> None:
     """  # noqa: D301
 
 
+def create_cli() -> click.Group:
+    """Create a fully registered CLI without invoking any command."""
+    group = click.Group(name="dit", callback=_cli_callback, help=_cli_callback.__doc__)
+    group.add_command(init_cmd)
+    group.add_command(add_cmd)
+    group.add_command(status_cmd)
+    group.add_command(push_cmd)
+    group.add_command(pull_cmd)
+    group.add_command(sync_cmd)
+    group.add_command(scope_group)
+    group.add_command(hook_group)
+    return group
+
+
+cli = create_cli()
+
+
 def main() -> None:
     """Register commands and invoke the Click group."""
-    cli.add_command(init_cmd)
-    cli.add_command(add_cmd)
-    cli.add_command(status_cmd)
-    cli.add_command(push_cmd)
-    cli.add_command(pull_cmd)
-    cli.add_command(sync_cmd)
-    cli.add_command(scope_group)
-    cli.add_command(hook_group)
     cli()
 
 

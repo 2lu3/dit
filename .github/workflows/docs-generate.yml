@@ -1,0 +1,92 @@
+name: Regenerate documentation
+
+on:
+  pull_request:
+    paths:
+      - "src/dit/**"
+      - "tests/**"
+      - "README.md"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "zensical.toml"
+      - "docs/guide/**"
+      - "docs/reference/**"
+      - "docs/source/guide-policy.md"
+      - ".github/workflows/docs-generate.yml"
+
+concurrency:
+  group: docs-generate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  fork-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject fork pull requests
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "Documentation generation requires a maintainer-owned branch because fork pull requests cannot access OPENAI_API_KEY or receive bot commits."
+          exit 1
+
+  generate:
+    needs: fork-guard
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - name: Checkout pull request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.DOCS_BOT_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Inspect head commit
+        id: head
+        run: |
+          if [ "$(git log -1 --pretty=%s)" = "docs: regenerate documentation" ]; then
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate all documentation
+        if: steps.head.outputs.generated != 'true'
+        run: uv run docs-generate
+
+      - name: Verify deterministic reference on generated commit
+        if: steps.head.outputs.generated == 'true'
+        run: |
+          uv run docs-reference
+          git diff --exit-code -- docs/reference/
+
+      - name: Validate documentation
+        run: uv run docs-validate
+
+      - name: Build site
+        run: uv run zensical build --clean
+
+      - name: Commit generated pages
+        if: steps.head.outputs.generated != 'true'
+        run: |
+          if git diff --quiet -- docs/; then
+            echo "Documentation is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git commit -m "docs: regenerate documentation"
+          git push origin "HEAD:${HEAD_REF}"

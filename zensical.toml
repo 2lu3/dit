@@ -1,0 +1,38 @@
+[project]
+site_name = "dit"
+site_description = "MD計算向けの大容量ファイル版管理ツール"
+site_url = "https://2lu3.github.io/dit/"
+repo_url = "https://github.com/2lu3/dit"
+repo_name = "2lu3/dit"
+nav = [
+  { Home = "index.md" },
+  { "User Guide" = [
+    { "はじめる" = "guide/getting-started.md" },
+    { "基本概念" = "guide/concepts.md" },
+    { "日常のワークフロー" = "guide/daily-workflow.md" },
+    { scope = "guide/scopes.md" },
+    { "トラブルシューティング" = "guide/troubleshooting.md" },
+  ] },
+  { Reference = [
+    { Overview = "reference/index.md" },
+    { init = "reference/init.md" },
+    { add = "reference/add.md" },
+    { status = "reference/status.md" },
+    { push = "reference/push.md" },
+    { pull = "reference/pull.md" },
+    { sync = "reference/sync.md" },
+    { scope = "reference/scope.md" },
+    { hook = "reference/hook.md" },
+  ] },
+]
+
+[project.theme]
+variant = "modern"
+language = "ja"
+features = [
+  "navigation.instant",
+  "navigation.sections",
+  "navigation.top",
+  "content.code.copy",
+  "search.suggest",
+]
