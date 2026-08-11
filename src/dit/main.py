@@ -25,12 +25,12 @@ def _cli_callback() -> None:
     ポインタ・実体・scope と sync の動き:
 
     \b
-      ポインタ+実体 / scope 内   一致確認。必要なら push / pull
-      ポインタ+実体 / scope 外   無視（触らない）
-      ポインタのみ / scope 内    リモートから pull
-      ポインタのみ / scope 外    無視
-      実体のみ / scope 内        警告（ポインタ未作成）
-      実体のみ / scope 外        無視
+      scope 外は無視（触らない）
+
+    \b
+      ポインタ+実体   一致確認。必要なら push / pull
+      ポインタのみ    リモートから pull
+      実体のみ        警告（ポインタ未作成）
     """  # noqa: D301
 
 
