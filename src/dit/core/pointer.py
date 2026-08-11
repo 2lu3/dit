@@ -1,4 +1,4 @@
-"""Pointer file read and write helpers."""
+"""ポインタファイルの読み書き補助."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from dit.core.repo import POINTER_SUFFIX
 
 @dataclass(frozen=True)
 class Pointer:
-    """Metadata pointer for a tracked data file."""
+    """追跡データファイル用のメタデータポインタ."""
 
     path: str
     hash: str
@@ -22,21 +22,21 @@ class Pointer:
 
     @property
     def pointer_relpath(self) -> str:
-        """Return the relative pointer path for this entry."""
+        """このエントリの相対ポインタパスを返す."""
         return self.path + POINTER_SUFFIX
 
     def to_dict(self) -> dict[str, str | int]:
-        """Return a TOML-serializable dict of pointer fields."""
+        """ポインタ項目の TOML シリアライズ可能な辞書を返す."""
         return {"path": self.path, "hash": self.hash, "size": self.size}
 
 
 def pointer_path_for(data_path: Path) -> Path:
-    """Return the pointer path next to a data file."""
+    """データファイル隣のポインタパスを返す."""
     return Path(str(data_path) + POINTER_SUFFIX)
 
 
 def data_path_for_pointer(pointer_path: Path) -> Path:
-    """Return the data file path for a pointer path."""
+    """ポインタパスに対応するデータファイルパスを返す."""
     text = str(pointer_path)
     if not text.endswith(POINTER_SUFFIX):
         msg = f"not a pointer path: {pointer_path}"
@@ -45,7 +45,7 @@ def data_path_for_pointer(pointer_path: Path) -> Path:
 
 
 def read_pointer(path: Path) -> Pointer:
-    """Load a Pointer from a TOML pointer file."""
+    """TOML ポインタファイルから Pointer を読み込む."""
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
@@ -63,7 +63,7 @@ def read_pointer(path: Path) -> Pointer:
 
 
 def write_pointer(repo_root: Path, pointer: Pointer) -> Path:
-    """Write a pointer file under the repository root."""
+    """リポジトリルート配下にポインタファイルを書き込む."""
     out = repo_root / pointer.pointer_relpath
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("wb") as f:
@@ -72,7 +72,7 @@ def write_pointer(repo_root: Path, pointer: Pointer) -> Path:
 
 
 def ensure_gitignore_entry(data_file: Path, rel_name: str) -> None:
-    """Ensure a data file name is listed in the nearest .gitignore."""
+    """最寄りの .gitignore にデータファイル名が載っていることを保証する."""
     gitignore = data_file.parent / ".gitignore"
     line = rel_name
     if gitignore.is_file():

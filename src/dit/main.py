@@ -1,4 +1,4 @@
-"""CLI entrypoint for dit."""
+"""dit の CLI エントリポイント."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def _cli_callback() -> None:
 
 
 def create_cli() -> click.Group:
-    """Create a fully registered CLI without invoking any command."""
+    """コマンドを実行せず、登録済みの CLI を作成する."""
     group = click.Group(name="dit", callback=_cli_callback, help=_cli_callback.__doc__)
     group.add_command(init_cmd)
     group.add_command(add_cmd)
@@ -52,7 +52,7 @@ cli = create_cli()
 
 
 def main() -> None:
-    """Register commands and invoke the Click group."""
+    """コマンドを登録し、Click グループを起動する."""
     cli()
 
 

@@ -1,4 +1,4 @@
-"""Git hook install and status helpers."""
+"""Git フックのインストールと状態確認の補助."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ HOOK_NAME = "pre-commit"
 
 
 def hooks_dir(repo_root: Path) -> Path:
-    """Return the git hooks directory for a repository."""
+    """リポジトリの git hooks ディレクトリを返す."""
     configured = _git_config_value(repo_root, "core.hooksPath")
     if configured:
         path = Path(configured)
@@ -26,12 +26,12 @@ def hooks_dir(repo_root: Path) -> Path:
 
 
 def hook_path(repo_root: Path) -> Path:
-    """Return the path of the dit-managed pre-commit hook."""
+    """Dit 管理の pre-commit フックのパスを返す."""
     return hooks_dir(repo_root) / HOOK_NAME
 
 
 def render_hook_script() -> str:
-    """Return the pre-commit hook script body."""
+    """pre-commit フックのスクリプト本体を返す."""
     try:
         template = resources.files("dit.hooks").joinpath(HOOK_NAME).read_text(encoding="utf-8")
     except (FileNotFoundError, TypeError, AttributeError):
@@ -46,7 +46,7 @@ def render_hook_script() -> str:
 
 
 def install_hook(repo_root: Path, *, force: bool = False) -> Path:
-    """Install the dit-managed pre-commit hook."""
+    """Dit 管理の pre-commit フックをインストールする."""
     path = hook_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and not force:
@@ -63,7 +63,7 @@ def install_hook(repo_root: Path, *, force: bool = False) -> Path:
 
 
 def uninstall_hook(repo_root: Path) -> bool:
-    """Remove the dit-managed pre-commit hook if present."""
+    """存在すれば dit 管理の pre-commit フックを削除する."""
     path = hook_path(repo_root)
     if not path.exists():
         return False
@@ -76,7 +76,7 @@ def uninstall_hook(repo_root: Path) -> bool:
 
 
 def hook_status(repo_root: Path) -> str:
-    """Return hook status: missing, installed, or unmanaged."""
+    """フック状態（missing / installed / unmanaged）を返す."""
     path = hook_path(repo_root)
     if not path.exists():
         return "missing"

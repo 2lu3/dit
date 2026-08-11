@@ -1,1 +1,1 @@
-"""Git hook helpers for dit."""
+"""dit 用の Git フック補助."""
