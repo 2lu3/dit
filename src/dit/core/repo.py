@@ -1,4 +1,4 @@
-"""Repository layout discovery and path helpers."""
+"""リポジトリ構成の探索とパス補助."""
 
 from __future__ import annotations
 
@@ -16,41 +16,41 @@ SCOPE_TOML_NAME = "scope.toml"
 
 @dataclass(frozen=True)
 class Repo:
-    """Paths for a dit-enabled git repository."""
+    """dit 対応 git リポジトリのパス群."""
 
     root: Path
 
     @property
     def dit_dir(self) -> Path:
-        """Return the .dit directory path."""
+        """.dit ディレクトリのパスを返す."""
         return self.root / DIT_DIR_NAME
 
     @property
     def dit_toml(self) -> Path:
-        """Return the dit.toml path."""
+        """dit.toml のパスを返す."""
         return self.root / DIT_TOML_NAME
 
     @property
     def index_db(self) -> Path:
-        """Return the SQLite index database path."""
+        """SQLite インデックス DB のパスを返す."""
         return self.dit_dir / INDEX_DB_NAME
 
     @property
     def scope_toml(self) -> Path:
-        """Return the scope.toml path."""
+        """scope.toml のパスを返す."""
         return self.dit_dir / SCOPE_TOML_NAME
 
     def rel(self, path: Path) -> str:
-        """Return a path relative to the repository root."""
+        """リポジトリルートからの相対パスを返す."""
         return path.resolve().relative_to(self.root.resolve()).as_posix()
 
     def abs(self, rel_path: str) -> Path:
-        """Resolve a repository-relative path to an absolute path."""
+        """リポジトリ相対パスを絶対パスへ解決する."""
         return (self.root / rel_path).resolve()
 
 
 def find_repo(start: Path | None = None) -> Repo:
-    """Find the enclosing git repository from a starting path."""
+    """開始パスから包含する git リポジトリを探す."""
     origin = (start or Path.cwd()).resolve()
     current = origin
     while True:
@@ -66,7 +66,7 @@ def find_repo(start: Path | None = None) -> Repo:
 
 
 def require_initialized(start: Path | None = None) -> Repo:
-    """Find a repository and require dit initialization."""
+    """リポジトリを探し、dit 初期化済みであることを要求する."""
     repo = find_repo(start)
     if not repo.dit_toml.is_file():
         msg = f"{DIT_TOML_NAME} not found in {repo.root}. Run `dit init` first."

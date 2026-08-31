@@ -1,4 +1,4 @@
-"""dit add command."""
+"""dit add コマンド."""
 
 from __future__ import annotations
 
