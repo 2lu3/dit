@@ -29,8 +29,7 @@ def _parameter_name(parameter: click.Parameter) -> str:
 def _parameter_default(parameter: click.Parameter, context: click.Context) -> str:
     default = parameter.get_default(context)
     if default is None or (
-        default.__class__.__module__ == "click._utils"
-        and getattr(default, "name", None) == "UNSET"
+        default.__class__.__module__ == "click._utils" and getattr(default, "name", None) == "UNSET"
     ):
         return "—"
     if isinstance(default, bool):

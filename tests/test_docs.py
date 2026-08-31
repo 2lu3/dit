@@ -86,9 +86,7 @@ def test_request_guide_uses_one_structured_response(monkeypatch: pytest.MonkeyPa
 
 def test_request_guide_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
     client = SimpleNamespace(
-        responses=SimpleNamespace(
-            create=lambda **kwargs: SimpleNamespace(output_text="not json")
-        )
+        responses=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(output_text="not json"))
     )
     monkeypatch.setattr("dit.docs.guide.collect_sources", lambda: "sources")
     with pytest.raises(ValueError, match="valid structured JSON"):

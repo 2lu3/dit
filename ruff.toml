@@ -28,6 +28,9 @@ ignore = [
   # ruff format が衝突を警告する唯一のルール。quote-style や indent-style を
   # 既定から変えると対象が増えるので、その際は ruff format の警告を再確認する。
   "COM812",
+
+  # ソース先頭の著作権ヘッダは置いていない（LICENSE のみ）
+  "CPY001",
 ]
 
 # --fix で消えると情報が失われるものは自動修正の対象から外す
