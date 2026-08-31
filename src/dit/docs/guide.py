@@ -27,8 +27,7 @@ class GuideGenerationError(ValueError):
 def guide_schema() -> dict[str, Any]:
     """モデルから受け取る厳密な JSON スキーマを返す."""
     properties = {
-        name.removesuffix(".md").replace("-", "_"): {"type": "string"}
-        for name in GUIDE_FILES
+        name.removesuffix(".md").replace("-", "_"): {"type": "string"} for name in GUIDE_FILES
     }
     return {
         "type": "object",

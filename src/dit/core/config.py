@@ -46,9 +46,7 @@ class DitConfig:
     """dit.toml のメモリ上表現."""
 
     remote: RemoteConfig | None = None
-    track_patterns: list[str] = field(
-        default_factory=lambda: list(DEFAULT_TRACK_PATTERNS)
-    )
+    track_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_TRACK_PATTERNS))
 
     @classmethod
     def load(cls, path: Path) -> DitConfig:
