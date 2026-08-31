@@ -19,6 +19,15 @@ cd /path/to/your-md-project
 dit init --bucket my-bucket --prefix md-project
 ```
 
+## 開発
+
+```bash
+uv sync --group dev
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run pytest
+```
+
 `dit.toml` 例:
 
 ```toml
