@@ -1,31 +1,31 @@
-"""Domain-specific exceptions for dit."""
+"""dit 向けドメイン固有例外."""
 
 from __future__ import annotations
 
 
 class DitError(Exception):
-    """Base error for dit operations."""
+    """dit 操作の基底エラー."""
 
 
 class ConfigError(DitError):
-    """Invalid or missing dit configuration."""
+    """無効または欠落した dit 設定."""
 
 
 class RepoError(DitError):
-    """Repository layout or discovery failure."""
+    """リポジトリ構成の解決または探索の失敗."""
 
 
 class HookError(DitError):
-    """Git hook install or uninstall failure."""
+    """Git フックのインストールまたはアンインストールの失敗."""
 
 
 class RemoteError(DitError):
-    """Remote storage operation failure."""
+    """リモートストレージ操作の失敗."""
 
 
 class PointerError(DitError):
-    """Pointer file read or write failure."""
+    """ポインタファイルの読み書き失敗."""
 
 
 class TrackError(DitError):
-    """Track pattern or path resolution failure."""
+    """追跡パターンまたはパス解決の失敗."""

@@ -1,4 +1,4 @@
-"""dit push, pull, and sync commands."""
+"""dit push / pull / sync コマンド."""
 
 from __future__ import annotations
 

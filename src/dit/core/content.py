@@ -1,4 +1,4 @@
-"""Local content hash and pointer helpers."""
+"""ローカル実体のハッシュとポインタ補助."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 def resolve_content_hash(repo: Repo, index: StatIndex, data_path: Path) -> str:
-    """Return content hash, using the stat index cache when possible."""
+    """可能なら stat インデックスキャッシュを使い、コンテンツハッシュを返す."""
     rel = repo.rel(data_path)
     size, mtime_ns, inode = file_stat_tuple(data_path)
     cached = index.get(rel)
@@ -43,7 +43,7 @@ def write_pointer_for_file(
     data_path: Path,
     content_hash: str | None = None,
 ) -> Pointer:
-    """Write a pointer file for local data and update gitignore."""
+    """ローカル実体のポインタを書き込み、gitignore を更新する."""
     rel = repo.rel(data_path)
     digest = content_hash or resolve_content_hash(repo, index, data_path)
     size, _, _ = file_stat_tuple(data_path)
@@ -54,5 +54,5 @@ def write_pointer_for_file(
 
 
 def utc_now_iso() -> str:
-    """Return the current UTC time as an ISO-8601 string."""
+    """現在の UTC 時刻を ISO-8601 文字列で返す."""
     return datetime.now(UTC).replace(microsecond=0).isoformat()

@@ -1,4 +1,4 @@
-"""SQLite-backed file stat index for tracked content."""
+"""追跡コンテンツ用の SQLite ベース file stat インデックス."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class IndexEntry:
-    """Cached file metadata and content hash for one path."""
+    """1 パス分のキャッシュ済みファイルメタデータとコンテンツハッシュ."""
 
     path: str
     size: int
@@ -23,10 +23,10 @@ class IndexEntry:
 
 
 class StatIndex:
-    """Persistent index of file stats and hashes."""
+    """ファイル stat とハッシュの永続インデックス."""
 
     def __init__(self, db_path: Path) -> None:
-        """Open or create the index database at db_path."""
+        """db_path のインデックス DB を開くか作成する."""
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path)
@@ -34,15 +34,15 @@ class StatIndex:
         self._ensure_schema()
 
     def close(self) -> None:
-        """Close the database connection."""
+        """データベース接続を閉じる."""
         self._conn.close()
 
     def __enter__(self) -> Self:
-        """Enter the context manager."""
+        """コンテキストマネージャに入る."""
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        """Exit the context manager and close the database."""
+        """コンテキストマネージャを抜け、データベースを閉じる."""
         self.close()
 
     def _ensure_schema(self) -> None:
@@ -61,7 +61,7 @@ class StatIndex:
         self._conn.commit()
 
     def get(self, path: str) -> IndexEntry | None:
-        """Return the index entry for a path, if any."""
+        """パスに対応するインデックスエントリがあれば返す."""
         row = self._conn.execute(
             "SELECT path, size, mtime_ns, inode, hash, pushed_at FROM entries WHERE path = ?",
             (path,),
@@ -78,7 +78,7 @@ class StatIndex:
         )
 
     def upsert(self, entry: IndexEntry) -> None:
-        """Insert or update an index entry."""
+        """インデックスエントリを挿入または更新する."""
         self._conn.execute(
             """
             INSERT INTO entries (path, size, mtime_ns, inode, hash, pushed_at)
@@ -102,7 +102,7 @@ class StatIndex:
         self._conn.commit()
 
     def mark_pushed(self, path: str, pushed_at: str) -> None:
-        """Record the push timestamp for a path."""
+        """パスの push 時刻を記録する."""
         self._conn.execute(
             "UPDATE entries SET pushed_at = ? WHERE path = ?",
             (pushed_at, path),
@@ -110,12 +110,12 @@ class StatIndex:
         self._conn.commit()
 
     def delete(self, path: str) -> None:
-        """Delete the index entry for a path."""
+        """パスのインデックスエントリを削除する."""
         self._conn.execute("DELETE FROM entries WHERE path = ?", (path,))
         self._conn.commit()
 
     def all_entries(self) -> list[IndexEntry]:
-        """Return all index entries."""
+        """すべてのインデックスエントリを返す."""
         rows = self._conn.execute(
             "SELECT path, size, mtime_ns, inode, hash, pushed_at FROM entries"
         ).fetchall()
@@ -133,11 +133,11 @@ class StatIndex:
 
 
 def file_stat_tuple(path: Path) -> tuple[int, int, int]:
-    """Return size, mtime_ns, and inode for a file path."""
+    """ファイルパスの size / mtime_ns / inode を返す."""
     st = path.stat()
     return (st.st_size, st.st_mtime_ns, getattr(st, "st_ino", 0))
 
 
 def stats_match(entry: IndexEntry, size: int, mtime_ns: int, inode: int) -> bool:
-    """Return whether an entry matches the given file stats."""
+    """エントリが指定の file stats と一致するかを返す."""
     return entry.size == size and entry.mtime_ns == mtime_ns and entry.inode == inode

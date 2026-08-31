@@ -1,4 +1,4 @@
-"""Stage tracked files as dit pointer files."""
+"""追跡ファイルを dit ポインタとしてステージする."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
-    """Write or update pointer files for in-scope tracked paths."""
+    """Scope 内の追跡パスについてポインタを作成または更新する."""
     config = load_config(repo)
     scope = Scope(repo)
     changed = 0

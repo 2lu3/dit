@@ -1,4 +1,4 @@
-"""Resolve tracked and pointer files from dit.toml patterns."""
+"""dit.toml のパターンから追跡ファイルとポインタを解決する."""
 
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ SKIP_DIR_NAMES = {".git", ".dit", "__pycache__", ".venv", "venv"}
 
 
 def build_track_spec(patterns: list[str]) -> pathspec.PathSpec:
-    """Build a gitwildmatch PathSpec from track patterns."""
+    """追跡パターンから gitwildmatch の PathSpec を構築する."""
     return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
 
 def load_gitignore_spec(repo: Repo) -> pathspec.PathSpec:
-    """Load .gitignore patterns as a PathSpec."""
+    """.gitignore パターンを PathSpec として読み込む."""
     patterns: list[str] = []
     gitignore = repo.root / ".gitignore"
     if gitignore.is_file():
@@ -32,13 +32,13 @@ def load_gitignore_spec(repo: Repo) -> pathspec.PathSpec:
 
 
 def is_tracked_path(rel_posix: str, *, is_dir: bool, track_spec: pathspec.PathSpec) -> bool:
-    """Return whether a relative path matches the track spec."""
+    """相対パスが追跡 spec に一致するかを返す."""
     candidate = rel_posix + ("/" if is_dir and not rel_posix.endswith("/") else "")
     return track_spec.match_file(candidate)
 
 
 def iter_tracked_files(repo: Repo, config: DitConfig) -> list[Path]:
-    """List tracked data files under the repo root."""
+    """リポジトリルート配下の追跡データファイルを列挙する."""
     track_spec = build_track_spec(config.track_patterns)
     ignore_spec = load_gitignore_spec(repo)
     results: list[Path] = []
@@ -57,7 +57,7 @@ def iter_tracked_files(repo: Repo, config: DitConfig) -> list[Path]:
 
 
 def iter_pointer_files(repo: Repo) -> list[Path]:
-    """List pointer files under the repo root."""
+    """リポジトリルート配下のポインタファイルを列挙する."""
     return sorted(
         path for path in _walk(repo.root) if path.name.endswith(POINTER_SUFFIX) and path.is_file()
     )

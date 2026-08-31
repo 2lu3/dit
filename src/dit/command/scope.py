@@ -1,4 +1,4 @@
-"""dit scope commands."""
+"""dit scope コマンド."""
 
 from __future__ import annotations
 

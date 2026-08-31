@@ -1,4 +1,4 @@
-"""Remote storage backends for dit."""
+"""dit のリモートストレージバックエンド."""
 
 from dit.core.remote.s3 import open_remote
 

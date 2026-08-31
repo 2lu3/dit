@@ -1,4 +1,4 @@
-"""Shared paths and atomic file helpers for documentation generation."""
+"""ドキュメント生成用の共有パスと原子的ファイル操作."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ GUIDE_FILES = (
 
 
 def project_root() -> Path:
-    """Return the repository root, with an override for tests and automation."""
+    """リポジトリルートを返す（テスト・自動化用の上書きあり）."""
     configured = os.environ.get("DIT_DOCS_ROOT")
     if configured:
         return Path(configured).resolve()
@@ -23,7 +23,7 @@ def project_root() -> Path:
 
 
 def replace_markdown_directory(directory: Path, files: dict[str, str]) -> None:
-    """Replace generated Markdown files after all content has been validated."""
+    """内容検証後に生成 Markdown ファイル群を置き換える."""
     directory.mkdir(parents=True, exist_ok=True)
     expected = set(files)
     for path in directory.glob("*.md"):
