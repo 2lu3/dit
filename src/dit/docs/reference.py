@@ -1,4 +1,4 @@
-"""Generate the public CLI reference directly from Click command objects."""
+"""Click コマンドオブジェクトから公開 CLI リファレンスを生成する."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def _section(command: click.Command, path: tuple[str, ...], level: int) -> list[
 
 
 def render_reference(cli: click.Group) -> dict[str, str]:
-    """Render one index and one page per top-level command."""
+    """索引 1 つとトップレベルコマンドごとのページを描画する."""
     names = cli.list_commands(click.Context(cli, info_name="dit"))
     index = [
         "# CLI Reference",
@@ -120,12 +120,12 @@ def render_reference(cli: click.Group) -> dict[str, str]:
 
 
 def generate_reference() -> None:
-    """Generate the complete CLI reference directory."""
+    """CLI リファレンス一式のディレクトリを生成する."""
     replace_markdown_directory(
         project_root() / "docs" / "reference", render_reference(create_cli())
     )
 
 
 def main() -> None:
-    """CLI entry point for reference generation."""
+    """リファレンス生成の CLI エントリポイント."""
     generate_reference()

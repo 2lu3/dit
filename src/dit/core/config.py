@@ -1,4 +1,4 @@
-"""Load and save dit.toml configuration."""
+"""dit.toml 設定の読み書き."""
 
 from __future__ import annotations
 
@@ -29,13 +29,13 @@ S3_REQUEST_TIMEOUT_SEC = 60
 
 @dataclass(frozen=True)
 class RemoteConfig:
-    """Remote storage bucket and key prefix."""
+    """リモートストレージのバケットとキープレフィックス."""
 
     bucket: str
     prefix: str
 
     def __post_init__(self) -> None:
-        """Reject an empty bucket name."""
+        """空のバケット名を拒否する."""
         if not self.bucket:
             msg = "remote bucket must not be empty"
             raise ConfigError(msg)
@@ -43,14 +43,14 @@ class RemoteConfig:
 
 @dataclass(frozen=True)
 class DitConfig:
-    """In-memory representation of dit.toml."""
+    """dit.toml のメモリ上表現."""
 
     remote: RemoteConfig | None = None
     track_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_TRACK_PATTERNS))
 
     @classmethod
     def load(cls, path: Path) -> DitConfig:
-        """Load configuration from a TOML file path."""
+        """TOML ファイルパスから設定を読み込む."""
         try:
             with path.open("rb") as f:
                 data = tomllib.load(f)
@@ -64,7 +64,7 @@ class DitConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DitConfig:
-        """Build configuration from a parsed TOML dictionary."""
+        """解析済み TOML 辞書から設定を構築する."""
         remote_data = data.get("remote")
         remote: RemoteConfig | None = None
         if remote_data is not None:
@@ -89,7 +89,7 @@ class DitConfig:
         return cls(remote=remote, track_patterns=[str(p) for p in patterns])
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize configuration to a TOML-ready dictionary."""
+        """TOML 向け辞書へ設定をシリアライズする."""
         result: dict[str, Any] = {"track": {"patterns": list(self.track_patterns)}}
         if self.remote is not None:
             result["remote"] = {
@@ -99,19 +99,19 @@ class DitConfig:
         return result
 
     def save(self, path: Path) -> None:
-        """Write configuration to a TOML file path."""
+        """設定を TOML ファイルパスへ書き込む."""
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as f:
             tomli_w.dump(self.to_dict(), f)
 
 
 def load_config(repo: Repo) -> DitConfig:
-    """Load dit.toml for the given repository."""
+    """指定リポジトリの dit.toml を読み込む."""
     return DitConfig.load(repo.dit_toml)
 
 
 def init_config(bucket: str, prefix: str) -> DitConfig:
-    """Build configuration for `dit init`."""
+    """`dit init` 用の設定を構築する."""
     return DitConfig(
         remote=RemoteConfig(bucket=bucket, prefix=prefix),
         track_patterns=list(DEFAULT_TRACK_PATTERNS),

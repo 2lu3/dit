@@ -1,4 +1,4 @@
-"""Generate the complete Japanese user guide with the OpenAI Responses API."""
+"""OpenAI Responses API で日本語 User Guide 全体を生成する."""
 
 from __future__ import annotations
 
@@ -21,11 +21,11 @@ GUIDE_TITLES = {
 
 
 class GuideGenerationError(ValueError):
-    """Raised when a generated guide is incomplete or malformed."""
+    """生成ガイドが不完全または不正なときに送出する."""
 
 
 def guide_schema() -> dict[str, Any]:
-    """Return the strict JSON schema accepted from the model."""
+    """モデルから受け取る厳密な JSON スキーマを返す."""
     properties = {
         name.removesuffix(".md").replace("-", "_"): {"type": "string"} for name in GUIDE_FILES
     }
@@ -38,7 +38,7 @@ def guide_schema() -> dict[str, Any]:
 
 
 def validate_guide_payload(payload: object) -> dict[str, str]:
-    """Validate and map the structured model response to exact filenames."""
+    """構造化レスポンスを検証し、正確なファイル名へ対応付ける."""
     if not isinstance(payload, dict):
         message = "guide response must be a JSON object"
         raise TypeError(message)
@@ -61,7 +61,7 @@ def validate_guide_payload(payload: object) -> dict[str, str]:
 
 
 def collect_sources() -> str:
-    """Collect only current, reviewable sources of truth for guide generation."""
+    """ガイド生成用に、現行でレビュー可能な一次情報だけを集める."""
     root = project_root()
     paths = [
         root / "README.md",
@@ -95,7 +95,7 @@ def _prompt(sources: str) -> str:
 
 
 def request_guide(client: OpenAI) -> dict[str, str]:
-    """Request and validate all guide pages in one Responses API call."""
+    """1 回の Responses API 呼び出しで全ガイドページを取得・検証する."""
     response = client.responses.create(
         model=MODEL,
         reasoning={"effort": "medium"},
@@ -118,7 +118,7 @@ def request_guide(client: OpenAI) -> dict[str, str]:
 
 
 def generate_guide(client: OpenAI | None = None) -> None:
-    """Generate, validate, and replace the complete user guide."""
+    """User Guide 全体を生成・検証し、置き換える."""
     if not os.environ.get("OPENAI_API_KEY") and client is None:
         message = "OPENAI_API_KEY is required to generate the user guide"
         raise RuntimeError(message)
@@ -128,5 +128,5 @@ def generate_guide(client: OpenAI | None = None) -> None:
 
 
 def main() -> None:
-    """CLI entry point for user guide generation."""
+    """User Guide 生成の CLI エントリポイント."""
     generate_guide()

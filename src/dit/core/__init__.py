@@ -1,1 +1,1 @@
-"""Core dit library primitives."""
+"""dit コアライブラリの基本要素."""

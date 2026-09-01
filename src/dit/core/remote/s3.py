@@ -1,4 +1,4 @@
-"""S3-compatible remote storage backend."""
+"""S3 互換のリモートストレージバックエンド."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _require_env_vars() -> dict[str, str]:
 
 
 def _s3_client_kwargs() -> dict[str, Any]:
-    """Build boto3 S3 client kwargs from required DIT_* environment variables."""
+    """必須の DIT_* 環境変数から boto3 S3 クライアント用 kwargs を構築する."""
     env = _require_env_vars()
     return {
         "endpoint_url": env["DIT_ENDPOINT_URL"],
@@ -53,10 +53,10 @@ def _s3_client_kwargs() -> dict[str, Any]:
 
 
 class S3Remote(Remote):
-    """S3 remote that stores objects under content-addressed keys."""
+    """コンテンツアドレスキーでオブジェクトを保存する S3 リモート."""
 
     def __init__(self, remote: RemoteConfig) -> None:
-        """Create an S3 client for the given remote configuration."""
+        """指定のリモート設定で S3 クライアントを作成する."""
         self.remote = remote
         self._client = boto3.client("s3", **_s3_client_kwargs())
         self._transfer = boto3.s3.transfer.TransferConfig(
@@ -66,14 +66,14 @@ class S3Remote(Remote):
         )
 
     def object_key(self, content_hash: str) -> str:
-        """Build the S3 object key for a content hash."""
+        """コンテンツハッシュから S3 オブジェクトキーを構築する."""
         digest = strip_hash_prefix(content_hash)
         prefix = self.remote.prefix.rstrip("/")
         base = f"files/blake3/{digest[:2]}/{digest[2:]}"
         return f"{prefix}/{base}" if prefix else base
 
     def exists(self, content_hash: str) -> bool:
-        """Return whether the object exists in the bucket."""
+        """オブジェクトがバケットに存在するかを返す."""
         key = self.object_key(content_hash)
         try:
             self._client.head_object(Bucket=self.remote.bucket, Key=key)
@@ -87,7 +87,7 @@ class S3Remote(Remote):
             return True
 
     def upload(self, local_path: Path, content_hash: str) -> None:
-        """Upload a local file if it is not already present remotely."""
+        """リモートに未存在ならローカルファイルをアップロードする."""
         key = self.object_key(content_hash)
         if self.exists(content_hash):
             return
@@ -103,7 +103,7 @@ class S3Remote(Remote):
             raise RemoteError(msg) from exc
 
     def download(self, content_hash: str, local_path: Path) -> None:
-        """Download a remote object to a local path via a temp file."""
+        """一時ファイル経由でリモートオブジェクトをローカルパスへダウンロードする."""
         key = self.object_key(content_hash)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = local_path.with_suffix(local_path.suffix + ".ditdownload")
@@ -122,7 +122,7 @@ class S3Remote(Remote):
             raise RemoteError(msg) from exc
 
     def delete(self, content_hash: str) -> None:
-        """Delete a remote object by content hash."""
+        """コンテンツハッシュでリモートオブジェクトを削除する."""
         key = self.object_key(content_hash)
         try:
             self._client.delete_object(Bucket=self.remote.bucket, Key=key)
@@ -131,7 +131,7 @@ class S3Remote(Remote):
             raise RemoteError(msg) from exc
 
     def list_hashes(self) -> list[str]:
-        """List content hashes stored under the remote prefix."""
+        """リモートプレフィックス配下に保存されたコンテンツハッシュを一覧する."""
         prefix = self.remote.prefix.rstrip("/")
         list_prefix = f"{prefix}/files/blake3/" if prefix else "files/blake3/"
         hashes: list[str] = []
@@ -167,5 +167,5 @@ def _digest_from_key(key: str, list_prefix: str) -> str | None:
 
 
 def open_remote(remote: RemoteConfig) -> S3Remote:
-    """Open an S3 remote for the given configuration."""
+    """指定設定で S3 リモートを開く."""
     return S3Remote(remote)
