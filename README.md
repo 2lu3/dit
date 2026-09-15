@@ -106,7 +106,7 @@ dit sync
 | `dit init` | `dit.toml` / `.dit/` / pre-commit フックを作成 |
 | `dit add` | scope 内で `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
 | `dit status` | 変更・未追跡・要 pull などを表示 |
-| `dit push` / `dit pull` | scope 内の低レベル転送 |
+| `dit push` / `dit pull` | scope 内の低レベル転送。進捗は K/M/Gbyte の N/N |
 | `dit sync` | 日常の同期（scope 内のみ）。`--dry-run` / `--prune-remote` |
 | `dit scope add\|remove\|list` | このマシンで実体を持つディレクトリ |
 | `dit hook install\|uninstall\|status` | pre-commit フック管理 |

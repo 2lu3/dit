@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import boto3
@@ -15,6 +16,18 @@ from dit.core.sync_service import SyncAction, run_pull, run_push, run_sync
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@dataclass
+class _ProgressCapture:
+    amounts: list[int] = field(default_factory=list)
+    paths: list[str] = field(default_factory=list)
+
+    def add_bytes(self, amount: int) -> None:
+        self.amounts.append(amount)
+
+    def set_path(self, path: str) -> None:
+        self.paths.append(path)
 
 
 @pytest.fixture(autouse=True)
@@ -108,13 +121,14 @@ def test_pull_downloads_missing_in_scope(tmp_path: Path) -> None:
     run_add(repo, quiet=True)
     run_push(repo, dry_run=False)
     target.unlink()
-    paths: list[str] = []
+    progress = _ProgressCapture()
 
-    results = run_pull(repo, progress=paths.append)
+    results = run_pull(repo, progress=progress)
 
     assert [result.action for result in results] == [SyncAction.PULL]
     assert target.read_bytes() == b"payload"
-    assert paths == ["keep/a.dcd"]
+    assert progress.paths == ["keep/a.dcd"]
+    assert sum(progress.amounts) == len(b"payload")
 
 
 @mock_aws
@@ -124,8 +138,9 @@ def test_push_reports_completed_uploads(tmp_path: Path) -> None:
     _write_tracked(repo, "keep", "a.dcd", b"payload")
     Scope(repo).add(repo.root / "keep")
     run_add(repo, quiet=True)
-    paths: list[str] = []
+    progress = _ProgressCapture()
 
-    run_push(repo, progress=paths.append)
+    run_push(repo, progress=progress)
 
-    assert paths == ["keep/a.dcd"]
+    assert progress.paths == ["keep/a.dcd"]
+    assert sum(progress.amounts) == len(b"payload")

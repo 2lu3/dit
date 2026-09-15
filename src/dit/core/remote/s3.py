@@ -15,6 +15,7 @@ from dit.core.hasher import strip_hash_prefix
 from dit.core.remote.base import Remote
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024
@@ -86,40 +87,69 @@ class S3Remote(Remote):
         else:
             return True
 
-    def upload(self, local_path: Path, content_hash: str) -> None:
+    def upload(
+        self,
+        local_path: Path,
+        content_hash: str,
+        *,
+        progress: Callable[[int], None] | None = None,
+    ) -> None:
         """リモートに未存在ならローカルファイルをアップロードする."""
         key = self.object_key(content_hash)
         if self.exists(content_hash):
             return
+        self._put_object(local_path, key, progress)
+
+    def download(
+        self,
+        content_hash: str,
+        local_path: Path,
+        *,
+        progress: Callable[[int], None] | None = None,
+    ) -> None:
+        """一時ファイル経由でリモートオブジェクトをローカルパスへダウンロードする."""
+        key = self.object_key(content_hash)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = local_path.with_suffix(local_path.suffix + ".ditdownload")
+        try:
+            self._get_object(tmp, key, progress)
+            tmp.replace(local_path)
+        except ClientError as exc:
+            tmp.unlink(missing_ok=True)
+            msg = f"failed to download s3://{self.remote.bucket}/{key} to {local_path}: {exc}"
+            raise RemoteError(msg) from exc
+
+    def _put_object(
+        self,
+        local_path: Path,
+        key: str,
+        progress: Callable[[int], None] | None,
+    ) -> None:
         try:
             self._client.upload_file(
                 Filename=str(local_path),
                 Bucket=self.remote.bucket,
                 Key=key,
                 Config=self._transfer,
+                **_callback_kw(progress),
             )
         except ClientError as exc:
             msg = f"failed to upload {local_path} to s3://{self.remote.bucket}/{key}: {exc}"
             raise RemoteError(msg) from exc
 
-    def download(self, content_hash: str, local_path: Path) -> None:
-        """一時ファイル経由でリモートオブジェクトをローカルパスへダウンロードする."""
-        key = self.object_key(content_hash)
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = local_path.with_suffix(local_path.suffix + ".ditdownload")
-        try:
-            self._client.download_file(
-                Bucket=self.remote.bucket,
-                Key=key,
-                Filename=str(tmp),
-                Config=self._transfer,
-            )
-            tmp.replace(local_path)
-        except ClientError as exc:
-            if tmp.exists():
-                tmp.unlink(missing_ok=True)
-            msg = f"failed to download s3://{self.remote.bucket}/{key} to {local_path}: {exc}"
-            raise RemoteError(msg) from exc
+    def _get_object(
+        self,
+        dest: Path,
+        key: str,
+        progress: Callable[[int], None] | None,
+    ) -> None:
+        self._client.download_file(
+            Bucket=self.remote.bucket,
+            Key=key,
+            Filename=str(dest),
+            Config=self._transfer,
+            **_callback_kw(progress),
+        )
 
     def delete(self, content_hash: str) -> None:
         """コンテンツハッシュでリモートオブジェクトを削除する."""
@@ -154,6 +184,12 @@ class S3Remote(Remote):
                 break
             continuation = resp.get("NextContinuationToken")
         return hashes
+
+
+def _callback_kw(progress: Callable[[int], None] | None) -> dict[str, Callable[[int], None]]:
+    if progress is None:
+        return {}
+    return {"Callback": progress}
 
 
 def _digest_from_key(key: str, list_prefix: str) -> str | None:
