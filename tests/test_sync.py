@@ -108,8 +108,24 @@ def test_pull_downloads_missing_in_scope(tmp_path: Path) -> None:
     run_add(repo, quiet=True)
     run_push(repo, dry_run=False)
     target.unlink()
+    paths: list[str] = []
 
-    results = run_pull(repo, dry_run=False)
+    results = run_pull(repo, progress=paths.append)
 
     assert [result.action for result in results] == [SyncAction.PULL]
     assert target.read_bytes() == b"payload"
+    assert paths == ["keep/a.dcd"]
+
+
+@mock_aws
+def test_push_reports_completed_uploads(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    _write_tracked(repo, "keep", "a.dcd", b"payload")
+    Scope(repo).add(repo.root / "keep")
+    run_add(repo, quiet=True)
+    paths: list[str] = []
+
+    run_push(repo, progress=paths.append)
+
+    assert paths == ["keep/a.dcd"]
