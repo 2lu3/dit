@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from alive_progress import alive_bar
+
 from dit.core.config import load_config
 from dit.core.content import resolve_content_hash, utc_now_iso, write_pointer_for_file
 from dit.core.errors import ConfigError, RepoError
@@ -108,6 +110,7 @@ def run_pull(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
     remote = require_remote(config)
     scope = Scope(repo)
     results: list[SyncResult] = []
+    targets: list[tuple[Pointer, Path]] = []
     for pointer_path in iter_pointer_files(repo):
         pointer = read_pointer(pointer_path)
         if not scope.contains(pointer.path):
@@ -116,8 +119,13 @@ def run_pull(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
         if data_path.is_file():
             continue
         results.append(SyncResult(pointer.path, SyncAction.PULL, "download"))
-        if not dry_run:
+        targets.append((pointer, data_path))
+    if dry_run or not targets:
+        return results
+    with alive_bar(len(targets), title="pull", unit="file") as bar:
+        for pointer, data_path in targets:
             remote.download(pointer.hash, data_path)
+            bar()
     return results
 
 
