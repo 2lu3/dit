@@ -97,3 +97,17 @@ def test_push_skips_out_of_scope(tmp_path: Path) -> None:
     assert run_push(repo, dry_run=False) == []
     assert target.is_file()
     assert read_pointer(repo.root / "keep" / "a.dcd.dit").path == "keep/a.dcd"
+
+
+@mock_aws
+def test_push_reports_completed_uploads(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    _write_tracked(repo, "keep", "a.dcd", b"payload")
+    Scope(repo).add(repo.root / "keep")
+    run_add(repo, quiet=True)
+    paths: list[str] = []
+
+    run_push(repo, progress=paths.append)
+
+    assert paths == ["keep/a.dcd"]

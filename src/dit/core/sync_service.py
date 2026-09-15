@@ -18,6 +18,7 @@ from dit.core.scope import Scope
 from dit.core.tracker import iter_pointer_files, iter_tracked_files
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from dit.core.config import DitConfig
@@ -79,7 +80,12 @@ def require_remote(config: DitConfig) -> Remote:
     return open_remote(config.remote)
 
 
-def run_push(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
+def run_push(
+    repo: Repo,
+    *,
+    dry_run: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> list[SyncResult]:
     """Scope 内でリモートに無いローカル実体をアップロードする."""
     config = load_config(repo)
     remote = require_remote(config)
@@ -99,6 +105,8 @@ def run_push(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
             if not dry_run:
                 remote.upload(data_path, pointer.hash)
                 index.mark_pushed(pointer.path, utc_now_iso())
+                if progress is not None:
+                    progress(pointer.path)
     return results
 
 
