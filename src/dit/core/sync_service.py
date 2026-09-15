@@ -110,7 +110,12 @@ def run_push(
     return results
 
 
-def run_pull(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
+def run_pull(
+    repo: Repo,
+    *,
+    dry_run: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> list[SyncResult]:
     """Scope 内で欠落しているローカルファイルへリモート実体をダウンロードする."""
     config = load_config(repo)
     remote = require_remote(config)
@@ -126,6 +131,8 @@ def run_pull(repo: Repo, *, dry_run: bool = False) -> list[SyncResult]:
         results.append(SyncResult(pointer.path, SyncAction.PULL, "download"))
         if not dry_run:
             remote.download(pointer.hash, data_path)
+            if progress is not None:
+                progress(pointer.path)
     return results
 
 
