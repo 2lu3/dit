@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import click
+from alive_progress import alive_bar
 
 from dit.core.repo import require_initialized
 from dit.core.sync_service import SyncAction, run_pull, run_push, run_sync
@@ -23,7 +24,19 @@ def push_cmd(*, dry_run: bool) -> None:
     """Scope 内ポインタが指すローカルオブジェクトをアップロードする."""
     try:
         repo = require_initialized()
-        results = run_push(repo, dry_run=dry_run)
+        if dry_run:
+            results = run_push(repo, dry_run=True)
+        else:
+            with alive_bar(title="push") as bar:
+
+                def report(path: str) -> None:
+                    bar.text(path)
+                    bar()
+
+                results = run_push(
+                    repo,
+                    progress=report,
+                )
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
     errors = _print_results(results)
