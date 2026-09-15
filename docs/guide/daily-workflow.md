@@ -11,7 +11,7 @@ $ dit sync --dry-run
 $ dit sync
 ```
 
-`--dry-run` は予定された処理だけを表示します。内容を確認してから通常の `dit sync` を実行できます。
+`--dry-run` は予定された処理だけを表示します。内容を確認してから通常の `dit sync` を実行できます。転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。
 
 ## ファイルを変更したあと
 
@@ -27,4 +27,4 @@ $ dit sync
 
 ## 低レベル転送
 
-`dit push` と `dit pull` は転送方向を明示したい場合の低レベル操作です。転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。通常は一致確認を含む `dit sync` を使います。remoteの孤児を削除する `dit sync --prune-remote` は通常の同期には必要ありません。
+`dit push` と `dit pull` は転送方向を明示したい場合の低レベル操作です。転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。通常は一致確認を含む `dit sync` を使います（転送進捗の表示は同じです）。remoteの孤児を削除する `dit sync --prune-remote` は通常の同期には必要ありません。

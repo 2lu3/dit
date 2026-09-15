@@ -94,6 +94,17 @@ class TransferProgress(Protocol):
         ...
 
 
+@dataclass
+class SyncStep:
+    """計画済みの同期 1 件."""
+
+    result: SyncResult
+    transfer: TransferJob | None = None
+
+
+_TRANSFER_ACTIONS = frozenset({SyncAction.PUSH, SyncAction.PULL})
+
+
 def require_remote(config: DitConfig) -> Remote:
     """設定されたリモートを開く。未設定なら例外を送出する."""
     if config.remote is None:
@@ -112,6 +123,30 @@ def plan_push(repo: Repo) -> list[TransferJob]:
 def plan_pull(repo: Repo) -> list[TransferJob]:
     """ダウンロード対象を収集する."""
     return collect_pull_jobs(repo, Scope(repo))
+
+
+def plan_sync(repo: Repo) -> list[SyncStep]:
+    """同期の更新と転送を計画する."""
+    config = load_config(repo)
+    remote = require_remote(config)
+    with StatIndex(repo.index_db) as index:
+        ctx = SyncCtx(
+            repo=repo,
+            index=index,
+            remote=remote,
+            scope=Scope(repo),
+            dry_run=True,
+        )
+        return _plan_all(ctx, config)
+
+
+def collect_sync_jobs(steps: list[SyncStep]) -> list[TransferJob]:
+    """計画済みステップから転送ジョブだけを取り出す."""
+    return [
+        step.transfer
+        for step in steps
+        if step.transfer is not None and step.result.action in _TRANSFER_ACTIONS
+    ]
 
 
 def collect_push_jobs(repo: Repo, remote: Remote, scope: Scope) -> list[TransferJob]:
@@ -230,84 +265,159 @@ def run_sync(
     *,
     dry_run: bool = False,
     prune_remote: bool = False,
+    progress: TransferProgress | None = None,
+    steps: list[SyncStep] | None = None,
 ) -> list[SyncResult]:
     """ローカル実体・ポインタ・リモートオブジェクトを突き合わせる."""
     config = load_config(repo)
     remote = require_remote(config)
-    scope = Scope(repo)
-    results: list[SyncResult] = []
     with StatIndex(repo.index_db) as index:
-        tracked = {repo.rel(path): path for path in iter_tracked_files(repo, config)}
-        pointers: dict[str, Pointer] = {}
-        for pointer_path in iter_pointer_files(repo):
-            pointer = read_pointer(pointer_path)
-            pointers[pointer.path] = pointer
-
         ctx = SyncCtx(
             repo=repo,
             index=index,
             remote=remote,
-            scope=scope,
+            scope=Scope(repo),
             dry_run=dry_run,
         )
-        for rel in sorted(set(tracked) | set(pointers)):
-            data_path = tracked.get(rel) or repo.abs(rel)
-            results.extend(
-                _sync_one(
-                    ctx,
-                    SyncItem(rel=rel, data_path=data_path, pointer=pointers.get(rel)),
-                )
-            )
+        pending = steps if steps is not None else _plan_all(ctx, config)
+        results = [_apply_step(ctx, step, progress) for step in pending]
         if prune_remote:
             results.extend(_prune_remote_orphans(repo, remote, dry_run=dry_run))
     return results
 
 
-def _sync_one(ctx: SyncCtx, item: SyncItem) -> list[SyncResult]:
+def _plan_all(ctx: SyncCtx, config: DitConfig) -> list[SyncStep]:
+    return [step for item in _iter_sync_items(ctx.repo, config) for step in _plan_item(ctx, item)]
+
+
+def _load_pointers(repo: Repo) -> dict[str, Pointer]:
+    pointers: dict[str, Pointer] = {}
+    for pointer_path in iter_pointer_files(repo):
+        pointer = read_pointer(pointer_path)
+        pointers[pointer.path] = pointer
+    return pointers
+
+
+def _iter_sync_items(repo: Repo, config: DitConfig) -> list[SyncItem]:
+    tracked = {repo.rel(path): path for path in iter_tracked_files(repo, config)}
+    pointers = _load_pointers(repo)
+    rels = sorted(set(tracked) | set(pointers))
+    return [
+        SyncItem(rel=rel, data_path=tracked.get(rel) or repo.abs(rel), pointer=pointers.get(rel))
+        for rel in rels
+    ]
+
+
+def _status_step(item: SyncItem, action: SyncAction, message: str) -> SyncStep:
+    return SyncStep(SyncResult(item.rel, action, message), None)
+
+
+def _transfer_step(
+    item: SyncItem,
+    action: SyncAction,
+    message: str,
+    content_hash: str,
+    size: int,
+) -> SyncStep:
+    job = TransferJob(item.rel, item.data_path, content_hash, size)
+    return SyncStep(SyncResult(item.rel, action, message), job)
+
+
+def _plan_item(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:
     if not ctx.scope.contains(item.rel):
         return []
     has_data = item.data_path.is_file()
     if item.pointer is not None and has_data:
-        return _sync_both(ctx, item)
-    if item.pointer is not None and not has_data:
-        return _sync_pointer_only(ctx, item)
-    if item.pointer is None and has_data:
-        return [SyncResult(item.rel, SyncAction.WARNING, "missing pointer or untracked")]
+        return _plan_both(ctx, item)
+    if item.pointer is not None:
+        return _plan_pointer_only(ctx, item)
+    if has_data:
+        return [_status_step(item, SyncAction.WARNING, "missing pointer or untracked")]
     return []
 
 
-def _sync_both(ctx: SyncCtx, item: SyncItem) -> list[SyncResult]:
+def _plan_both(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:
     pointer = _require_pointer(item)
     local_hash = resolve_content_hash(ctx.repo, ctx.index, item.data_path)
-    active = pointer
-    results: list[SyncResult] = []
+    if local_hash == pointer.hash:
+        return _plan_after_active(ctx, item, pointer.hash, pointer.size)
+    return _plan_both_mismatch(ctx, item, local_hash)
 
-    if local_hash != pointer.hash:
-        results.extend(_resolve_hash_mismatch(ctx, item, local_hash=local_hash))
-        if results and results[-1].action == SyncAction.ERROR:
-            return results
-        if not ctx.dry_run:
-            active = read_pointer(ctx.repo.root / pointer.pointer_relpath)
-        else:
-            data_mtime = item.data_path.stat().st_mtime_ns
-            pointer_mtime = (ctx.repo.root / pointer.pointer_relpath).stat().st_mtime_ns
-            if data_mtime >= pointer_mtime:
-                active = Pointer(
-                    path=item.rel,
-                    hash=local_hash,
-                    size=item.data_path.stat().st_size,
-                )
 
-    remote_has = ctx.remote.exists(active.hash)
-    if has_local_needing_push(item.data_path, remote_has=remote_has):
-        results.append(SyncResult(item.rel, SyncAction.PUSH, "upload"))
-        if not ctx.dry_run:
-            ctx.remote.upload(item.data_path, active.hash)
-            ctx.index.mark_pushed(item.rel, utc_now_iso())
+def _plan_after_active(
+    ctx: SyncCtx,
+    item: SyncItem,
+    content_hash: str,
+    size: int,
+) -> list[SyncStep]:
+    steps = _plan_push_if_needed(ctx, item, content_hash, size)
+    return steps or [_status_step(item, SyncAction.OK, "in sync")]
 
-    if not results:
-        results.append(SyncResult(item.rel, SyncAction.OK, "in sync"))
-    return results
+
+def _plan_push_if_needed(
+    ctx: SyncCtx,
+    item: SyncItem,
+    content_hash: str,
+    size: int,
+) -> list[SyncStep]:
+    remote_has = ctx.remote.exists(content_hash)
+    if not has_local_needing_push(item.data_path, remote_has=remote_has):
+        return []
+    return [_transfer_step(item, SyncAction.PUSH, "upload", content_hash, size)]
+
+
+def _is_local_newer(ctx: SyncCtx, item: SyncItem) -> bool:
+    pointer = _require_pointer(item)
+    data_mtime = item.data_path.stat().st_mtime_ns
+    pointer_mtime = (ctx.repo.root / pointer.pointer_relpath).stat().st_mtime_ns
+    return data_mtime >= pointer_mtime
+
+
+def _plan_both_mismatch(ctx: SyncCtx, item: SyncItem, local_hash: str) -> list[SyncStep]:
+    pointer = _require_pointer(item)
+    if _is_local_newer(ctx, item):
+        size = item.data_path.stat().st_size
+        updated = _transfer_step(item, SyncAction.UPDATE_POINTER, "local newer", local_hash, size)
+        return [updated, *_plan_push_if_needed(ctx, item, local_hash, size)]
+    if not ctx.remote.exists(pointer.hash):
+        return [_status_step(item, SyncAction.ERROR, "pointer newer but remote missing")]
+    return [_transfer_step(item, SyncAction.PULL, "pointer newer", pointer.hash, pointer.size)]
+
+
+def _plan_pointer_only(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:
+    pointer = _require_pointer(item)
+    if not ctx.remote.exists(pointer.hash):
+        return [_status_step(item, SyncAction.ERROR, "file not found locally or remotely")]
+    return [_transfer_step(item, SyncAction.PULL, "download", pointer.hash, pointer.size)]
+
+
+def _apply_step(
+    ctx: SyncCtx,
+    step: SyncStep,
+    progress: TransferProgress | None,
+) -> SyncResult:
+    if not ctx.dry_run:
+        _execute_step(ctx, step, progress)
+    return step.result
+
+
+def _execute_step(
+    ctx: SyncCtx,
+    step: SyncStep,
+    progress: TransferProgress | None,
+) -> None:
+    job = step.transfer
+    if job is None:
+        return
+    action = step.result.action
+    if action == SyncAction.UPDATE_POINTER:
+        write_pointer_for_file(ctx.repo, ctx.index, job.data_path, job.content_hash)
+        return
+    if action == SyncAction.PUSH:
+        _upload_job(ctx.remote, ctx.index, job, progress)
+        return
+    if action == SyncAction.PULL:
+        _download_job(ctx.remote, job, progress)
 
 
 def has_local_needing_push(data_path: Path, *, remote_has: bool) -> bool:
@@ -320,37 +430,6 @@ def _require_pointer(item: SyncItem) -> Pointer:
         msg = f"pointer required for {item.rel}"
         raise RepoError(msg)
     return item.pointer
-
-
-def _resolve_hash_mismatch(
-    ctx: SyncCtx,
-    item: SyncItem,
-    *,
-    local_hash: str,
-) -> list[SyncResult]:
-    pointer = _require_pointer(item)
-    data_mtime = item.data_path.stat().st_mtime_ns
-    pointer_mtime = (ctx.repo.root / pointer.pointer_relpath).stat().st_mtime_ns
-    if data_mtime >= pointer_mtime:
-        results = [SyncResult(item.rel, SyncAction.UPDATE_POINTER, "local newer")]
-        if not ctx.dry_run:
-            write_pointer_for_file(ctx.repo, ctx.index, item.data_path, local_hash)
-        return results
-
-    if not ctx.remote.exists(pointer.hash):
-        return [SyncResult(item.rel, SyncAction.ERROR, "pointer newer but remote missing")]
-    if not ctx.dry_run:
-        ctx.remote.download(pointer.hash, item.data_path)
-    return [SyncResult(item.rel, SyncAction.PULL, "pointer newer")]
-
-
-def _sync_pointer_only(ctx: SyncCtx, item: SyncItem) -> list[SyncResult]:
-    pointer = _require_pointer(item)
-    if not ctx.remote.exists(pointer.hash):
-        return [SyncResult(item.rel, SyncAction.ERROR, "file not found locally or remotely")]
-    if not ctx.dry_run:
-        ctx.remote.download(pointer.hash, item.data_path)
-    return [SyncResult(item.rel, SyncAction.PULL, "download")]
 
 
 def _prune_remote_orphans(
