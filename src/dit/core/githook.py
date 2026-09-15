@@ -50,8 +50,8 @@ def render_hook_script() -> str:
         return (
             "#!/bin/sh\n"
             f"{HOOK_MARKER}\n"
-            'command -v dit >/dev/null 2>&1 || { echo "dit: not found in PATH" >&2; exit 1; }\n'
-            "exec dit add --quiet\n"
+            'command -v uv >/dev/null 2>&1 || { echo "dit: uv not found in PATH" >&2; exit 1; }\n'
+            "exec uv run dit add --quiet\n"
         )
     else:
         return template
