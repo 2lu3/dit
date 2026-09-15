@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import click
 
-from dit.core.config import init_config
+from dit.core.config import init_config, load_config
 from dit.core.errors import RepoError
 from dit.core.githook import install_hook
 from dit.core.repo import DIT_DIR_NAME, find_repo
 
 
 @click.command("init")
-@click.option("--bucket", required=True, help="S3 バケット名")
-@click.option("--prefix", required=True, help="バケット内のキープレフィックス")
+@click.option("--bucket", help="S3 バケット名（新規作成時）")
+@click.option("--prefix", help="バケット内のキープレフィックス（新規作成時）")
 @click.option("--force-hook", is_flag=True, help="管理外の pre-commit フックを上書きする")
 def init_cmd(
-    bucket: str,
-    prefix: str,
+    bucket: str | None,
+    prefix: str | None,
     *,
     force_hook: bool,
 ) -> None:
@@ -27,8 +27,12 @@ def init_cmd(
         raise RepoError(msg)
 
     if repo.dit_toml.exists():
+        load_config(repo)
         click.echo(f"already initialized: {repo.dit_toml}")
     else:
+        if bucket is None or prefix is None:
+            msg = "--bucket and --prefix are required when dit.toml is missing"
+            raise click.UsageError(msg)
         config = init_config(bucket=bucket, prefix=prefix)
         config.save(repo.dit_toml)
         click.echo(f"wrote {repo.dit_toml}")

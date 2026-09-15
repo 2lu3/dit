@@ -45,7 +45,7 @@ def test_reference_contains_commands_arguments_and_options() -> None:
         "hook.md",
     }
     assert "`--bucket`" in pages["init.md"]
-    assert "yes" in pages["init.md"]
+    assert "no" in pages["init.md"]
     assert "`directory`" in pages["scope.md"]
     assert "## `dit scope add`" in pages["scope.md"]
     assert "`--prune-remote`" in pages["sync.md"]

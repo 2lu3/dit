@@ -53,7 +53,51 @@ export DIT_SECRET_KEY=...
 export DIT_ENDPOINT_URL=https://minio.example.com
 ```
 
-`dit init` では `--bucket` と `--prefix` が必須。
+新規リポジトリでは `dit init` に `--bucket` と `--prefix` を指定する。clone 済みで `dit.toml` がある場合は、引数なしの `dit init` で設定を読み込んで `.dit/` と hook を作成する。
+
+## 使い方
+
+### 新しいリポジトリで使う
+
+```bash
+cd /path/to/your-md-project
+dit init --bucket my-bucket --prefix md-project
+```
+
+`dit init` は `dit.toml`、`.dit/`、Git の pre-commit hook を作成します。`dit.toml` の `[track].patterns` に管理対象を記述してください。
+
+### clone したリポジトリで使う
+
+`dit.toml` は Git で共有されるため、clone 後は bucket と prefix を指定せずに初期化できます。
+
+```bash
+git clone <repository-url>
+cd <repository-directory>
+dit init
+```
+
+これで、この作業ツリーに `.dit/` と pre-commit hook が作成されます。worktree から実行する場合も同じです。
+
+### 同期するディレクトリを登録する
+
+実体をこのマシンに置くディレクトリだけを scope に登録します。
+
+```bash
+dit scope add data
+dit scope list
+```
+
+scope 外のファイルは `dit add`、`dit push`、`dit pull`、`dit sync` の対象になりません。
+
+### 日常の操作
+
+```bash
+dit status
+dit sync --dry-run
+dit sync
+```
+
+`dit sync` は scope 内の実体とポインタ（`*.dit`）を確認し、必要に応じて remote へ push または remote から pull します。Git commit 時には pre-commit hook が `dit add` を実行してポインタを更新・stageします。
 
 ## コマンド
 

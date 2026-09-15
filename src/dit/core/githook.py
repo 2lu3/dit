@@ -16,12 +16,24 @@ HOOK_NAME = "pre-commit"
 
 def hooks_dir(repo_root: Path) -> Path:
     """リポジトリの git hooks ディレクトリを返す."""
-    configured = _git_config_value(repo_root, "core.hooksPath")
-    if configured:
-        path = Path(configured)
-        if not path.is_absolute():
-            path = repo_root / path
-        return path
+    git = shutil.which("git")
+    if git is not None:
+        try:
+            result = subprocess.run(  # noqa: S603  # fixed argv: absolute git + fixed args
+                [git, "rev-parse", "--git-path", "hooks"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        else:
+            value = result.stdout.strip()
+            if result.returncode == 0 and value:
+                path = Path(value)
+                return path if path.is_absolute() else repo_root / path
     return repo_root / ".git" / "hooks"
 
 
@@ -84,22 +96,3 @@ def hook_status(repo_root: Path) -> str:
     if HOOK_MARKER in content:
         return "installed"
     return "unmanaged"
-
-
-def _git_config_value(repo_root: Path, key: str) -> str | None:
-    git = shutil.which("git")
-    if git is None:
-        return None
-    try:
-        result = subprocess.run(  # noqa: S603  # fixed argv: absolute git + config get
-            [git, "config", "--get", key],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    value = result.stdout.strip()
-    return value or None
