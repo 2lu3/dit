@@ -28,6 +28,7 @@ def push_cmd(*, dry_run: bool) -> None:
             results = run_push(repo, dry_run=True)
         else:
             with alive_bar(title="push") as bar:
+
                 def report(path: str) -> None:
                     bar.text(path)
                     bar()
