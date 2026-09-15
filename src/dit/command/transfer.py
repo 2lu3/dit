@@ -50,7 +50,19 @@ def pull_cmd(*, dry_run: bool) -> None:
     """欠落しているオブジェクトを scope 内からダウンロードする."""
     try:
         repo = require_initialized()
-        results = run_pull(repo, dry_run=dry_run)
+        if dry_run:
+            results = run_pull(repo, dry_run=True)
+        else:
+            with alive_bar(title="pull") as bar:
+
+                def report(path: str) -> None:
+                    bar.text(path)
+                    bar()
+
+                results = run_pull(
+                    repo,
+                    progress=report,
+                )
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
     errors = _print_results(results)

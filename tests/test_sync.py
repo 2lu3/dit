@@ -11,7 +11,7 @@ from dit.core.config import init_config
 from dit.core.pointer import Pointer, read_pointer, write_pointer
 from dit.core.repo import Repo
 from dit.core.scope import Scope
-from dit.core.sync_service import SyncAction, run_push, run_sync
+from dit.core.sync_service import SyncAction, run_pull, run_push, run_sync
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -97,6 +97,24 @@ def test_push_skips_out_of_scope(tmp_path: Path) -> None:
     assert run_push(repo, dry_run=False) == []
     assert target.is_file()
     assert read_pointer(repo.root / "keep" / "a.dcd.dit").path == "keep/a.dcd"
+
+
+@mock_aws
+def test_pull_downloads_missing_in_scope(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    target = _write_tracked(repo, "keep", "a.dcd", b"payload")
+    Scope(repo).add(repo.root / "keep")
+    run_add(repo, quiet=True)
+    run_push(repo, dry_run=False)
+    target.unlink()
+    paths: list[str] = []
+
+    results = run_pull(repo, progress=paths.append)
+
+    assert [result.action for result in results] == [SyncAction.PULL]
+    assert target.read_bytes() == b"payload"
+    assert paths == ["keep/a.dcd"]
 
 
 @mock_aws
