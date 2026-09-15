@@ -2,6 +2,8 @@
 
 欠落しているオブジェクトを scope 内からダウンロードする.
 
+転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示する.
+
 ```console
 $ dit pull [OPTIONS]
 ```

@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from dit.core.config import load_config
 from dit.core.content import resolve_content_hash, utc_now_iso, write_pointer_for_file
@@ -72,6 +72,28 @@ class SyncItem:
     pointer: Pointer | None = None
 
 
+@dataclass
+class TransferJob:
+    """1 ファイル分の転送対象."""
+
+    path: str
+    data_path: Path
+    content_hash: str
+    size: int
+
+
+class TransferProgress(Protocol):
+    """バイト転送の進捗通知."""
+
+    def add_bytes(self, amount: int) -> None:
+        """転送増分バイトを記録する."""
+        ...
+
+    def set_path(self, path: str) -> None:
+        """現在転送中のパスを表示する."""
+        ...
+
+
 def require_remote(config: DitConfig) -> Remote:
     """設定されたリモートを開く。未設定なら例外を送出する."""
     if config.remote is None:
@@ -80,60 +102,127 @@ def require_remote(config: DitConfig) -> Remote:
     return open_remote(config.remote)
 
 
+def plan_push(repo: Repo) -> list[TransferJob]:
+    """アップロード対象を収集する."""
+    config = load_config(repo)
+    remote = require_remote(config)
+    return collect_push_jobs(repo, remote, Scope(repo))
+
+
+def plan_pull(repo: Repo) -> list[TransferJob]:
+    """ダウンロード対象を収集する."""
+    return collect_pull_jobs(repo, Scope(repo))
+
+
+def collect_push_jobs(repo: Repo, remote: Remote, scope: Scope) -> list[TransferJob]:
+    """Scope 内で未アップロードの実体を列挙する."""
+    jobs = [_push_job(repo, remote, scope, read_pointer(path)) for path in iter_pointer_files(repo)]
+    return [job for job in jobs if job is not None]
+
+
+def collect_pull_jobs(repo: Repo, scope: Scope) -> list[TransferJob]:
+    """Scope 内で欠落している実体を列挙する."""
+    jobs = [_pull_job(repo, scope, read_pointer(path)) for path in iter_pointer_files(repo)]
+    return [job for job in jobs if job is not None]
+
+
+def _push_job(
+    repo: Repo,
+    remote: Remote,
+    scope: Scope,
+    pointer: Pointer,
+) -> TransferJob | None:
+    if not scope.contains(pointer.path):
+        return None
+    data_path = repo.abs(pointer.path)
+    if not data_path.is_file() or remote.exists(pointer.hash):
+        return None
+    return TransferJob(
+        path=pointer.path,
+        data_path=data_path,
+        content_hash=pointer.hash,
+        size=data_path.stat().st_size,
+    )
+
+
+def _pull_job(repo: Repo, scope: Scope, pointer: Pointer) -> TransferJob | None:
+    if not scope.contains(pointer.path):
+        return None
+    data_path = repo.abs(pointer.path)
+    if data_path.is_file():
+        return None
+    return TransferJob(
+        path=pointer.path,
+        data_path=data_path,
+        content_hash=pointer.hash,
+        size=pointer.size,
+    )
+
+
+def _byte_callback(progress: TransferProgress | None) -> Callable[[int], None] | None:
+    if progress is None:
+        return None
+    return progress.add_bytes
+
+
+def _notify_path(progress: TransferProgress | None, path: str) -> None:
+    if progress is not None:
+        progress.set_path(path)
+
+
 def run_push(
     repo: Repo,
     *,
     dry_run: bool = False,
-    progress: Callable[[str], None] | None = None,
+    progress: TransferProgress | None = None,
+    jobs: list[TransferJob] | None = None,
 ) -> list[SyncResult]:
     """Scope 内でリモートに無いローカル実体をアップロードする."""
     config = load_config(repo)
     remote = require_remote(config)
-    scope = Scope(repo)
-    results: list[SyncResult] = []
+    pending = jobs if jobs is not None else collect_push_jobs(repo, remote, Scope(repo))
+    if dry_run:
+        return [SyncResult(job.path, SyncAction.PUSH, "upload") for job in pending]
     with StatIndex(repo.index_db) as index:
-        for pointer_path in iter_pointer_files(repo):
-            pointer = read_pointer(pointer_path)
-            if not scope.contains(pointer.path):
-                continue
-            data_path = repo.abs(pointer.path)
-            if not data_path.is_file():
-                continue
-            if remote.exists(pointer.hash):
-                continue
-            results.append(SyncResult(pointer.path, SyncAction.PUSH, "upload"))
-            if not dry_run:
-                remote.upload(data_path, pointer.hash)
-                index.mark_pushed(pointer.path, utc_now_iso())
-                if progress is not None:
-                    progress(pointer.path)
-    return results
+        return [_upload_job(remote, index, job, progress) for job in pending]
+
+
+def _upload_job(
+    remote: Remote,
+    index: StatIndex,
+    job: TransferJob,
+    progress: TransferProgress | None,
+) -> SyncResult:
+    _notify_path(progress, job.path)
+    remote.upload(job.data_path, job.content_hash, progress=_byte_callback(progress))
+    index.mark_pushed(job.path, utc_now_iso())
+    return SyncResult(job.path, SyncAction.PUSH, "upload")
 
 
 def run_pull(
     repo: Repo,
     *,
     dry_run: bool = False,
-    progress: Callable[[str], None] | None = None,
+    progress: TransferProgress | None = None,
+    jobs: list[TransferJob] | None = None,
 ) -> list[SyncResult]:
     """Scope 内で欠落しているローカルファイルへリモート実体をダウンロードする."""
     config = load_config(repo)
     remote = require_remote(config)
-    scope = Scope(repo)
-    results: list[SyncResult] = []
-    for pointer_path in iter_pointer_files(repo):
-        pointer = read_pointer(pointer_path)
-        if not scope.contains(pointer.path):
-            continue
-        data_path = repo.abs(pointer.path)
-        if data_path.is_file():
-            continue
-        results.append(SyncResult(pointer.path, SyncAction.PULL, "download"))
-        if not dry_run:
-            remote.download(pointer.hash, data_path)
-            if progress is not None:
-                progress(pointer.path)
-    return results
+    pending = jobs if jobs is not None else collect_pull_jobs(repo, Scope(repo))
+    if dry_run:
+        return [SyncResult(job.path, SyncAction.PULL, "download") for job in pending]
+    return [_download_job(remote, job, progress) for job in pending]
+
+
+def _download_job(
+    remote: Remote,
+    job: TransferJob,
+    progress: TransferProgress | None,
+) -> SyncResult:
+    _notify_path(progress, job.path)
+    remote.download(job.content_hash, job.data_path, progress=_byte_callback(progress))
+    return SyncResult(job.path, SyncAction.PULL, "download")
 
 
 def run_sync(

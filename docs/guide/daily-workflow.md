@@ -27,4 +27,4 @@ $ dit sync
 
 ## 低レベル転送
 
-`dit push` と `dit pull` は転送方向を明示したい場合の低レベル操作です。通常は一致確認を含む `dit sync` を使います。remoteの孤児を削除する `dit sync --prune-remote` は通常の同期には必要ありません。
+`dit push` と `dit pull` は転送方向を明示したい場合の低レベル操作です。転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。通常は一致確認を含む `dit sync` を使います。remoteの孤児を削除する `dit sync --prune-remote` は通常の同期には必要ありません。
