@@ -5,7 +5,7 @@ MD 計算向けの大容量ファイル版管理ツール（DVC 非依存）。
 ## コンセプト
 
 - 管理対象はリポジトリルートの `dit.toml` で宣言する（`.gitignore` と同じ書式）
-- `git commit` 時の pre-commit フックが `dit add` を自動実行し、ポインタ `*.dit` をステージする
+- `git commit` 時の pre-commit フックが `uv run dit add` を自動実行し、ポインタ `*.dit` をステージする
 - ローカルキャッシュは持たない。ワークツリーの実体 + リモートが真実
 - 日常操作は `dit sync`（scope 内だけ一致確認と置く/pull。scope 外は触らない）
 
@@ -97,7 +97,7 @@ dit sync --dry-run
 dit sync
 ```
 
-`dit sync` は scope 内の実体とポインタ（`*.dit`）を確認し、必要に応じて remote へ push または remote から pull します。Git commit 時には pre-commit hook が `dit add` を実行してポインタを更新・stageします。
+`dit sync` は scope 内の実体とポインタ（`*.dit`）を確認し、必要に応じて remote へ push または remote から pull します。Git commit 時には pre-commit hook が `uv run dit add` を実行してポインタを更新・stageします。
 
 ## コマンド
 

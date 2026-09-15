@@ -39,4 +39,7 @@ def test_init_reads_committed_config_in_worktree(tmp_path: Path, monkeypatch) ->
 
     assert result.exit_code == 0
     assert (worktree / ".dit" / ".gitignore").is_file()
-    assert hook_path(worktree).is_file()
+    hook = hook_path(worktree)
+    assert hook.is_file()
+    assert "command -v uv" in hook.read_text(encoding="utf-8")
+    assert "exec uv run dit add --quiet" in hook.read_text(encoding="utf-8")

@@ -15,7 +15,7 @@ $ dit sync
 
 ## ファイルを変更したあと
 
-インストールされたpre-commitフックは、Gitのcommit時に `dit add` を実行してscope内のポインタを更新します。
+インストールされたpre-commitフックは、Gitのcommit時に `uv run dit add` を実行してscope内のポインタを更新します。
 
 ```console
 $ git add dit.toml path/to/file.dit
