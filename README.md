@@ -97,7 +97,7 @@ dit sync --dry-run
 dit sync
 ```
 
-`dit sync` は scope 内の実体とポインタ（`*.dit`）を確認し、必要に応じて remote へ push または remote から pull します。Git commit 時には pre-commit hook が `uv run dit add` を実行してポインタを更新・stageします。
+`dit sync` は scope 内の実体とポインタ（`*.dit`）を確認し、必要に応じて remote へ push または remote から pull します。転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。Git commit 時には pre-commit hook が `uv run dit add` を実行してポインタを更新・stageします。
 
 ## コマンド
 
@@ -107,7 +107,7 @@ dit sync
 | `dit add` | scope 内で `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
 | `dit status` | 変更・未追跡・要 pull などを表示 |
 | `dit push` / `dit pull` | scope 内の低レベル転送。進捗は K/M/Gbyte の N/N |
-| `dit sync` | 日常の同期（scope 内のみ）。`--dry-run` / `--prune-remote` |
+| `dit sync` | 日常の同期（scope 内のみ）。転送進捗は K/M/Gbyte の N/N。`--dry-run` / `--prune-remote` |
 | `dit scope add\|remove\|list` | このマシンで実体を持つディレクトリ |
 | `dit hook install\|uninstall\|status` | pre-commit フック管理 |
 

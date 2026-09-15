@@ -15,7 +15,7 @@ from dit.core.hasher import hash_file
 from dit.core.remote.s3 import S3Remote
 from dit.core.repo import Repo
 from dit.core.scope import Scope
-from dit.core.sync_service import plan_pull, plan_push, run_push
+from dit.core.sync_service import collect_sync_jobs, plan_pull, plan_push, plan_sync, run_push
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -106,4 +106,33 @@ def test_plan_push_and_pull_use_file_and_pointer_sizes(tmp_path: Path) -> None:
     target.unlink()
     pull_jobs = plan_pull(repo)
     assert [job.size for job in pull_jobs] == [len(b"payload-size")]
+    assert [job.path for job in pull_jobs] == ["keep/a.dcd"]
+
+
+@mock_aws
+def test_plan_sync_jobs_use_file_and_pointer_sizes(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / ".dit").mkdir()
+    config = init_config(bucket="test-bucket", prefix="md")
+    config.save(root / "dit.toml")
+    repo = Repo(root=root)
+    keep = root / "keep"
+    keep.mkdir()
+    target = keep / "a.dcd"
+    payload = b"sync-size"
+    target.write_bytes(payload)
+    Scope(repo).add(keep)
+    run_add(repo, quiet=True)
+    push_jobs = collect_sync_jobs(plan_sync(repo))
+    assert [job.size for job in push_jobs] == [len(payload)]
+    assert [job.path for job in push_jobs] == ["keep/a.dcd"]
+
+    run_push(repo, dry_run=False)
+    assert collect_sync_jobs(plan_sync(repo)) == []
+    target.unlink()
+    pull_jobs = collect_sync_jobs(plan_sync(repo))
+    assert [job.size for job in pull_jobs] == [len(payload)]
     assert [job.path for job in pull_jobs] == ["keep/a.dcd"]

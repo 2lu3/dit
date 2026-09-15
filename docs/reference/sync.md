@@ -2,6 +2,8 @@
 
 Scope 内だけリモートと同期する.
 
+転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示する.
+
 ```console
 $ dit sync [OPTIONS]
 ```

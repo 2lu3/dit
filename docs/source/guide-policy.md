@@ -11,6 +11,7 @@
 ## 製品方針
 
 - 日常操作には `dit sync` を推奨する。
+- `dit sync`、`dit push`、`dit pull` の転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示する。
 - `dit push` と `dit pull` は、必要な場合にだけ使う低レベル操作として説明する。
 - scopeは「このマシンで実体を置くディレクトリ」と定義する。
 - scope外の実体には触れないことを明記する。
