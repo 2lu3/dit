@@ -1,6 +1,6 @@
 # CLI Reference
 
-`dit` の公開インターフェースです。このページ群はClick定義から自動生成されています。
+`dit` の公開インターフェースです。CLI変更時に手動で更新します。
 
 | Command | Description |
 |---|---|

@@ -1,6 +1,6 @@
-# User Guide生成方針
+# User Guide編集方針
 
-このファイルは、LLMがUser Guide全体を再生成するときの編集上の正本である。
+このファイルは、User Guideを手動編集するときの編集方針である。
 
 ## 読者
 
