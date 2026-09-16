@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
@@ -18,6 +19,18 @@ from dit.main import cli
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@dataclass
+class _ProgressCapture:
+    amounts: list[int] = field(default_factory=list)
+    paths: list[str] = field(default_factory=list)
+
+    def add_bytes(self, amount: int) -> None:
+        self.amounts.append(amount)
+
+    def set_path(self, path: str) -> None:
+        self.paths.append(path)
 
 
 @pytest.fixture(autouse=True)
@@ -143,13 +156,14 @@ def test_pull_downloads_missing_in_scope(tmp_path: Path) -> None:
     run_add(repo, quiet=True)
     run_push(repo, dry_run=False)
     target.unlink()
-    paths: list[str] = []
+    progress = _ProgressCapture()
 
-    results = run_pull(repo, progress=paths.append)
+    results = run_pull(repo, progress=progress)
 
     assert [result.action for result in results] == [SyncAction.PULL]
     assert target.read_bytes() == b"payload"
-    assert paths == ["keep/a.dcd"]
+    assert progress.paths == ["keep/a.dcd"]
+    assert sum(progress.amounts) == len(b"payload")
 
 
 @mock_aws
@@ -159,8 +173,66 @@ def test_push_reports_completed_uploads(tmp_path: Path) -> None:
     _write_tracked(repo, "keep", "a.dcd", b"payload")
     Scope(repo).add(repo.root / "keep")
     run_add(repo, quiet=True)
-    paths: list[str] = []
+    progress = _ProgressCapture()
 
-    run_push(repo, progress=paths.append)
+    run_push(repo, progress=progress)
 
-    assert paths == ["keep/a.dcd"]
+    assert progress.paths == ["keep/a.dcd"]
+    assert sum(progress.amounts) == len(b"payload")
+
+
+@mock_aws
+def test_sync_reports_push_progress(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    _write_tracked(repo, "keep", "a.dcd", b"payload")
+    Scope(repo).add(repo.root / "keep")
+    run_add(repo, quiet=True)
+    progress = _ProgressCapture()
+
+    results = run_sync(repo, progress=progress)
+
+    assert SyncAction.PUSH in {result.action for result in results}
+    assert progress.paths == ["keep/a.dcd"]
+    assert sum(progress.amounts) == len(b"payload")
+
+
+@mock_aws
+def test_sync_reports_pull_progress(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    target = _write_tracked(repo, "keep", "a.dcd", b"payload")
+    Scope(repo).add(repo.root / "keep")
+    run_add(repo, quiet=True)
+    run_push(repo, dry_run=False)
+    target.unlink()
+    progress = _ProgressCapture()
+
+    results = run_sync(repo, progress=progress)
+
+    assert [result.action for result in results] == [SyncAction.PULL]
+    assert target.read_bytes() == b"payload"
+    assert progress.paths == ["keep/a.dcd"]
+    assert sum(progress.amounts) == len(b"payload")
+
+
+@mock_aws
+def test_sync_reports_combined_push_and_pull_progress(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    existing = _write_tracked(repo, "keep", "a.dcd", b"aaa-payload")
+    Scope(repo).add(repo.root / "keep")
+    run_add(repo, quiet=True)
+    run_push(repo, dry_run=False)
+    existing.unlink()
+    _write_tracked(repo, "keep", "b.dcd", b"bbb-payload")
+    run_add(repo, quiet=True)
+    progress = _ProgressCapture()
+
+    results = run_sync(repo, progress=progress)
+
+    actions = {result.action for result in results}
+    assert SyncAction.PULL in actions
+    assert SyncAction.PUSH in actions
+    assert sorted(progress.paths) == ["keep/a.dcd", "keep/b.dcd"]
+    assert sum(progress.amounts) == len(b"aaa-payload") + len(b"bbb-payload")

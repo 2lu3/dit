@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -17,11 +18,23 @@ class Remote(ABC):
         """指定ハッシュのオブジェクトがリモートに存在するかを返す."""
 
     @abstractmethod
-    def upload(self, local_path: Path, content_hash: str) -> None:
+    def upload(
+        self,
+        local_path: Path,
+        content_hash: str,
+        *,
+        progress: Callable[[int], None] | None = None,
+    ) -> None:
         """指定コンテンツハッシュでローカルファイルをアップロードする."""
 
     @abstractmethod
-    def download(self, content_hash: str, local_path: Path) -> None:
+    def download(
+        self,
+        content_hash: str,
+        local_path: Path,
+        *,
+        progress: Callable[[int], None] | None = None,
+    ) -> None:
         """リモートオブジェクトをローカルパスへダウンロードする."""
 
     @abstractmethod

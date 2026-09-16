@@ -49,6 +49,9 @@ def test_reference_contains_commands_arguments_and_options() -> None:
     assert "`directory`" in pages["scope.md"]
     assert "## `dit scope add`" in pages["scope.md"]
     assert "`--prune-remote`" in pages["sync.md"]
+    assert "Kbyte / Mbyte / Gbyte" in pages["push.md"]
+    assert "Kbyte / Mbyte / Gbyte" in pages["pull.md"]
+    assert "Kbyte / Mbyte / Gbyte" in pages["sync.md"]
 
 
 @pytest.mark.parametrize(
