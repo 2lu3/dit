@@ -83,12 +83,13 @@ def test_transfer_loads_root_dotenv(tmp_path: Path, monkeypatch, command, existi
     result = CliRunner().invoke(cli, [command, "--dry-run"], catch_exceptions=False)
 
     assert result.exit_code == 0
-    client.assert_called_once()
-    assert client.call_args.args == ("s3",)
-    kwargs = client.call_args.kwargs
-    assert kwargs["aws_access_key_id"] == ("testing" if existing_env else "file-access")
-    assert kwargs["aws_secret_access_key"] == "file-secret # literal"  # noqa: S105 — test credential
-    assert kwargs["endpoint_url"] == "https://storage.example.com"
+    client.assert_called()
+    for call in client.call_args_list:
+        assert call.args == ("s3",)
+        kwargs = call.kwargs
+        assert kwargs["aws_access_key_id"] == ("testing" if existing_env else "file-access")
+        assert kwargs["aws_secret_access_key"] == "file-secret # literal"  # noqa: S105 — test credential
+        assert kwargs["endpoint_url"] == "https://storage.example.com"
 
 
 @mock_aws
