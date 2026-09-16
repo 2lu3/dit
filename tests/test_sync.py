@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import boto3
 import pytest
+from click.testing import CliRunner
 from moto import mock_aws
 
 from dit.core.add_service import run_add
@@ -12,6 +14,7 @@ from dit.core.pointer import Pointer, read_pointer, write_pointer
 from dit.core.repo import Repo
 from dit.core.scope import Scope
 from dit.core.sync_service import SyncAction, run_pull, run_push, run_sync
+from dit.main import cli
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,6 +44,38 @@ def _write_tracked(repo: Repo, rel_dir: str, name: str, payload: bytes) -> Path:
     target = directory / name
     target.write_bytes(payload)
     return target
+
+
+@pytest.mark.parametrize("command", ["push", "pull", "sync"])
+@pytest.mark.parametrize("existing_env", [False, True])
+def test_transfer_loads_root_dotenv(tmp_path: Path, monkeypatch, command, existing_env) -> None:
+    repo = _init_repo(tmp_path)
+    (repo.root / ".env").write_text(
+        'export DIT_ACCESS_KEY="file-access"\n'
+        "DIT_SECRET_KEY='file-secret # literal'\n"
+        "DIT_ENDPOINT_URL=https://storage.example.com # endpoint\n",
+        encoding="utf-8",
+    )
+    nested = repo.root / "nested"
+    nested.mkdir()
+    (nested / ".env").write_text("DIT_ACCESS_KEY=wrong-directory\n", encoding="utf-8")
+    monkeypatch.chdir(nested)
+    monkeypatch.delenv("DIT_SECRET_KEY")
+    monkeypatch.delenv("DIT_ENDPOINT_URL")
+    if not existing_env:
+        monkeypatch.delenv("DIT_ACCESS_KEY")
+    client = Mock()
+    monkeypatch.setattr(boto3, "client", client)
+
+    result = CliRunner().invoke(cli, [command, "--dry-run"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    client.assert_called_once()
+    assert client.call_args.args == ("s3",)
+    kwargs = client.call_args.kwargs
+    assert kwargs["aws_access_key_id"] == ("testing" if existing_env else "file-access")
+    assert kwargs["aws_secret_access_key"] == "file-secret # literal"  # noqa: S105 — test credential
+    assert kwargs["endpoint_url"] == "https://storage.example.com"
 
 
 @mock_aws

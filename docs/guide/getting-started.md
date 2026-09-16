@@ -20,11 +20,15 @@ $ dit init --bucket my-bucket --prefix md-project
 
 ## 認証情報を設定する
 
-```console
-$ export DIT_ACCESS_KEY=...
-$ export DIT_SECRET_KEY=...
-$ export DIT_ENDPOINT_URL=https://minio.example.com
+操作対象の Git リポジトリ直下に `.env` を作成します。
+
+```dotenv
+DIT_ACCESS_KEY=...
+DIT_SECRET_KEY=...
+DIT_ENDPOINT_URL=https://minio.example.com
 ```
+
+サブディレクトリから実行しても、リポジトリ直下の `.env` を読み込みます。worktree では各 worktree 直下が対象です。既存の環境変数が優先されるため、従来どおり `export` だけでも利用できます。`.env` は `.gitignore` に追加し、コミットしないでください。
 
 ## scopeを設定して同期する
 
