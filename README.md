@@ -45,13 +45,15 @@ patterns = [
 ]
 ```
 
-認証と endpoint は環境変数で指定する（未設定だとエラー）。
+認証と endpoint は環境変数、または操作対象の Git リポジトリ直下の `.env` で指定する（未設定だとエラー）。
 
-```bash
-export DIT_ACCESS_KEY=...
-export DIT_SECRET_KEY=...
-export DIT_ENDPOINT_URL=https://minio.example.com
+```dotenv
+DIT_ACCESS_KEY=...
+DIT_SECRET_KEY=...
+DIT_ENDPOINT_URL=https://minio.example.com
 ```
+
+サブディレクトリから実行しても、リポジトリ直下の `.env` を読み込む。worktree では各 worktree 直下が対象。既存の環境変数を優先し、`.env` がなくても環境変数だけで利用できる。秘密情報を含む `.env` は `.gitignore` に追加し、コミットしない。
 
 新規リポジトリでは `dit init` に `--bucket` と `--prefix` を指定する。clone 済みで `dit.toml` がある場合は、引数なしの `dit init` で設定を読み込んで `.dit/` と hook を作成する。
 

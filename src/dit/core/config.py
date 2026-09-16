@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import tomli_w
+from dotenv import load_dotenv
 
 from dit.core.errors import ConfigError
 
@@ -106,7 +107,8 @@ class DitConfig:
 
 
 def load_config(repo: Repo) -> DitConfig:
-    """指定リポジトリの dit.toml を読み込む."""
+    """指定リポジトリの .env と dit.toml を読み込む。既存の環境変数を優先する."""
+    load_dotenv(repo.root / ".env", override=False)
     return DitConfig.load(repo.dit_toml)
 
 
