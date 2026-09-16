@@ -20,9 +20,6 @@ dependencies = [
 
 [project.scripts]
 dit = "dit.main:main"
-docs-reference = "dit.docs.reference:main"
-docs-guide = "dit.docs.guide:main"
-docs-generate = "dit.docs.generate:main"
 docs-validate = "dit.docs.validate:main"
 
 [dependency-groups]
@@ -33,7 +30,6 @@ dev = [
     "ruff>=0.16.1",
 ]
 docs = [
-    "openai>=1.99.0,<2.0.0",
     "zensical>=0.0.15,<0.1.0",
 ]
 

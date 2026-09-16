@@ -1,4 +1,4 @@
-"""ドキュメント生成用の共有パスと原子的ファイル操作."""
+"""ドキュメント検証用の共有パス."""
 
 from __future__ import annotations
 
@@ -20,16 +20,3 @@ def project_root() -> Path:
     if configured:
         return Path(configured).resolve()
     return Path(__file__).resolve().parents[3]
-
-
-def replace_markdown_directory(directory: Path, files: dict[str, str]) -> None:
-    """内容検証後に生成 Markdown ファイル群を置き換える."""
-    directory.mkdir(parents=True, exist_ok=True)
-    expected = set(files)
-    for path in directory.glob("*.md"):
-        if path.name not in expected:
-            path.unlink()
-    for name, content in files.items():
-        temporary = directory / f".{name}.tmp"
-        temporary.write_text(content.rstrip() + "\n", encoding="utf-8")
-        temporary.replace(directory / name)
