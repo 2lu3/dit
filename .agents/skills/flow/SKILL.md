@@ -14,6 +14,11 @@ description: Use when the user explicitly invokes the repository lifecycle as `f
 
 There is no `flow m` phase. `flow a` owns PR merge.
 
+Permission summary:
+
+- `flow c` authorizes pushing the feature branch and creating or updating one Draft PR. It does not authorize merging a PR.
+- `flow a` includes all `flow c` permissions and additionally authorizes merging the target PR.
+
 `flow c` and `flow a` are resumable endpoint commands. Before changing anything, identify the current state and print the phases that will run. Do not rerun completed work unnecessarily, and do not infer a task from a branch name.
 
 ## Authorization boundaries
@@ -22,8 +27,8 @@ An explicit phase invocation authorizes only the operations in that phase and an
 
 - `p` authorizes task registration, but not implementation or Git delivery.
 - `d` authorizes implementation and local validation, but not commit, push, PR creation, or PR merge.
-- `c` authorizes the `p`/`d` prerequisites when needed, commit, merging the latest `origin/main` into the feature branch, push, and creating or updating one Draft PR. It NEVER authorizes merging a PR.
-- `a` authorizes all required `p`/`d`/`c` work and PR merge. It is the only phase that merges a PR.
+- `c` authorizes the `p`/`d` prerequisites when needed, commit, merging the latest `origin/main` into the feature branch, pushing the feature branch, and creating or updating one Draft PR. It NEVER authorizes merging a PR.
+- `a` authorizes all required `p`/`d`/`c` work, including `c`'s push and Draft PR creation/update permissions, and PR merge. It is the only phase that merges a PR.
 
 Never run the entire lifecycle for a bare `flow` request. Report the valid phases and stop. If a phase is invalid or ambiguous, stop before mutation.
 
