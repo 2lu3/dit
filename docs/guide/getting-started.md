@@ -14,9 +14,10 @@ Gitリポジトリでbucketとprefixを指定します。
 
 ```console
 $ dit init --bucket my-bucket --prefix md-project
+$ pre-commit install
 ```
 
-作成された `dit.toml` の `[track].patterns` に、管理するファイルやディレクトリを `.gitignore` と同じ形式で記述します。
+作成された `dit.toml` の `[track].patterns` に、管理するファイルやディレクトリを `.gitignore` と同じ形式で記述します。`dit init` は既存の pre-commit 設定を保持したまま dit hook を追加します。
 
 ## 認証情報を設定する
 

@@ -1,7 +1,0 @@
-#!/bin/sh
-# managed by dit
-command -v uv >/dev/null 2>&1 || {
-  echo "dit: uv not found in PATH; install uv or uninstall the hook" >&2
-  exit 1
-}
-exec uv run dit add --quiet

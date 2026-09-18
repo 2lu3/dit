@@ -1,6 +1,6 @@
 # `dit init`
 
-dit.toml / .dit/ / pre-commit フックを初期化する.
+dit.toml / .dit/ / pre-commit 設定を初期化する.
 
 ```console
 $ dit init [OPTIONS]
@@ -12,5 +12,4 @@ $ dit init [OPTIONS]
 |---|---|---:|---|---|
 | `--bucket` | text | no | — | S3 バケット名（新規作成時） |
 | `--prefix` | text | no | — | バケット内のキープレフィックス（新規作成時） |
-| `--force-hook` | boolean | no | false | 管理外の pre-commit フックを上書きする |
 | `--help` | boolean | no | false | Show this message and exit. |
