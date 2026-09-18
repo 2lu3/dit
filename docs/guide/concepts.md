@@ -10,7 +10,7 @@ remoteは `dit.toml` のbucketとprefixで指定します。認証情報とendpo
 
 ## scope
 
-scopeは、このマシンで実体を置くディレクトリの集合です。`dit sync`、`dit push`、`dit pull`、`dit add` はscope内だけを対象にし、scope外の実体には触れません。
+scopeは、このマシンで実体を置くディレクトリの集合です。ディレクトリを指定しない場合はリポジトリ全体がscopeになります。`dit sync`、`dit push`、`dit pull`、`dit add` はscope内だけを対象にし、scope外の実体には触れません。
 
 そのため、同じGitリポジトリを複数マシンで共有しながら、マシンごとに必要なデータだけを保持できます。[scopeの使い方](scopes.md)も参照してください。
 

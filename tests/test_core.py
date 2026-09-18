@@ -92,6 +92,8 @@ def test_scope_contains(git_repo: Repo) -> None:
     target = git_repo.root / "data" / "07_production"
     target.mkdir(parents=True)
     scope = Scope(git_repo)
+    assert scope.contains("data/01_min/a.dcd")
+    assert not scope.contains("../outside/a.dcd")
     scope.add(target)
     assert scope.contains("data/07_production/a.dcd")
     assert not scope.contains("data/01_min/a.dcd")
