@@ -1,6 +1,6 @@
 # `dit hook`
 
-pre-commit フックを管理する.
+`.pre-commit-config.yaml` の dit hook を管理する.
 
 ```console
 $ dit hook [OPTIONS] COMMAND [ARGS]...
@@ -14,22 +14,21 @@ $ dit hook [OPTIONS] COMMAND [ARGS]...
 
 ## `dit hook install`
 
-pre-commit フックをインストールする.
+pre-commit 設定に dit hook を追加する.
 
 ```console
-$ dit hook install [OPTIONS]
+$ dit hook install
 ```
 
 ### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `--force` | boolean | no | false | 管理外のフックを上書きする |
 | `--help` | boolean | no | false | Show this message and exit. |
 
 ## `dit hook status`
 
-pre-commit フックの状態を表示する.
+pre-commit 設定内の dit hook の状態を表示する.
 
 ```console
 $ dit hook status [OPTIONS]
@@ -43,7 +42,7 @@ $ dit hook status [OPTIONS]
 
 ## `dit hook uninstall`
 
-pre-commit フックをアンインストールする.
+pre-commit 設定から dit hook を削除する.
 
 ```console
 $ dit hook uninstall [OPTIONS]

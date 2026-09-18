@@ -6,6 +6,7 @@ MD計算で扱う大容量ファイルを、Gitとは分離して版管理する
 
 ```console
 $ pip install git+https://github.com/2lu3/dit.git
+$ pip install pre-commit
 ```
 
 ## 最短の使い方
@@ -13,6 +14,7 @@ $ pip install git+https://github.com/2lu3/dit.git
 ```console
 $ cd /path/to/your-md-project
 $ dit init --bucket my-bucket --prefix md-project
+$ pre-commit install
 $ dit scope add data
 $ dit sync
 ```

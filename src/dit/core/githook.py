@@ -1,14 +1,10 @@
-"""Git フックのインストールと状態確認の補助."""
+"""旧 Git hook の移行補助."""
 
 from __future__ import annotations
 
 import shutil
-import stat
 import subprocess
-from importlib import resources
 from pathlib import Path
-
-from dit.core.errors import HookError
 
 HOOK_MARKER = "# managed by dit"
 HOOK_NAME = "pre-commit"
@@ -38,61 +34,33 @@ def hooks_dir(repo_root: Path) -> Path:
 
 
 def hook_path(repo_root: Path) -> Path:
-    """Dit 管理の pre-commit フックのパスを返す."""
+    """旧 dit 管理の pre-commit hook のパスを返す."""
     return hooks_dir(repo_root) / HOOK_NAME
 
 
-def render_hook_script() -> str:
-    """pre-commit フックのスクリプト本体を返す."""
-    try:
-        template = resources.files("dit.hooks").joinpath(HOOK_NAME).read_text(encoding="utf-8")
-    except (FileNotFoundError, TypeError, AttributeError):
-        return (
-            "#!/bin/sh\n"
-            f"{HOOK_MARKER}\n"
-            'command -v uv >/dev/null 2>&1 || { echo "dit: uv not found in PATH" >&2; exit 1; }\n'
-            "exec uv run dit add --quiet\n"
-        )
-    else:
-        return template
-
-
-def install_hook(repo_root: Path, *, force: bool = False) -> Path:
-    """Dit 管理の pre-commit フックをインストールする."""
+def legacy_hook_paths(repo_root: Path) -> tuple[Path, Path]:
+    """旧 hook と pre-commit の退避 hook のパスを返す."""
     path = hook_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and not force:
-        content = path.read_text(encoding="utf-8")
-        if HOOK_MARKER not in content:
-            msg = (
-                f"existing hook at {path} is not managed by dit; "
-                "merge manually or re-run with --force"
-            )
-            raise HookError(msg)
-    path.write_text(render_hook_script(), encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return path
+    return path, path.with_name(f"{HOOK_NAME}.legacy")
 
 
-def uninstall_hook(repo_root: Path) -> bool:
-    """存在すれば dit 管理の pre-commit フックを削除する."""
-    path = hook_path(repo_root)
-    if not path.exists():
-        return False
-    content = path.read_text(encoding="utf-8")
-    if HOOK_MARKER not in content:
-        msg = f"refusing to remove unmanaged hook: {path}"
-        raise HookError(msg)
-    path.unlink()
-    return True
+def remove_managed_hooks(repo_root: Path) -> bool:
+    """旧 dit 管理の hook だけを削除する."""
+    removed = False
+    for path in legacy_hook_paths(repo_root):
+        if path.exists() and HOOK_MARKER in path.read_text(encoding="utf-8"):
+            path.unlink()
+            removed = True
+    return removed
 
 
 def hook_status(repo_root: Path) -> str:
-    """フック状態（missing / installed / unmanaged）を返す."""
-    path = hook_path(repo_root)
-    if not path.exists():
-        return "missing"
-    content = path.read_text(encoding="utf-8")
-    if HOOK_MARKER in content:
-        return "installed"
-    return "unmanaged"
+    """旧 hook の状態（missing / installed / unmanaged）を返す."""
+    unmanaged = False
+    for path in legacy_hook_paths(repo_root):
+        if not path.exists():
+            continue
+        if HOOK_MARKER in path.read_text(encoding="utf-8"):
+            return "installed"
+        unmanaged = True
+    return "unmanaged" if unmanaged else "missing"

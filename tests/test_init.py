@@ -39,7 +39,71 @@ def test_init_reads_committed_config_in_worktree(tmp_path: Path, monkeypatch) ->
 
     assert result.exit_code == 0
     assert (worktree / ".dit" / ".gitignore").is_file()
-    hook = hook_path(worktree)
-    assert hook.is_file()
-    assert "command -v uv" in hook.read_text(encoding="utf-8")
-    assert "exec uv run dit add --quiet" in hook.read_text(encoding="utf-8")
+    config = worktree / ".pre-commit-config.yaml"
+    assert config.is_file()
+    assert "repo: local" in config.read_text(encoding="utf-8")
+    assert "id: dit" in config.read_text(encoding="utf-8")
+
+
+def test_init_preserves_existing_pre_commit_config(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    init_config(bucket="bucket", prefix="prefix").save(repo / "dit.toml")
+    config = repo / ".pre-commit-config.yaml"
+    existing = (
+        "repos:\n"
+        "  - repo: https://github.com/pre-commit/pre-commit-hooks\n"
+        "    rev: v5.0.0\n"
+        "    hooks:\n"
+        "      - id: trailing-whitespace\n"
+    )
+    config.write_text(existing, encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    result = CliRunner().invoke(init_cmd, [], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    updated = config.read_text(encoding="utf-8")
+    assert updated.startswith(existing)
+    assert updated.count("id: dit\n") == 1
+
+    result = CliRunner().invoke(init_cmd, [], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert config.read_text(encoding="utf-8") == updated
+
+
+def test_init_removes_legacy_dit_hook(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    init_config(bucket="bucket", prefix="prefix").save(repo / "dit.toml")
+    legacy = hook_path(repo)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("#!/bin/sh\n# managed by dit\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    result = CliRunner().invoke(init_cmd, [], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert not legacy.exists()
+
+
+def test_init_removes_legacy_dit_hook_saved_by_pre_commit(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    init_config(bucket="bucket", prefix="prefix").save(repo / "dit.toml")
+    current = hook_path(repo)
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.write_text("#!/bin/sh\n# managed by pre-commit\n", encoding="utf-8")
+    legacy = current.with_name("pre-commit.legacy")
+    legacy.write_text("#!/bin/sh\n# managed by dit\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    result = CliRunner().invoke(init_cmd, [], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert current.exists()
+    assert not legacy.exists()

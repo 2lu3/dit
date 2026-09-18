@@ -6,21 +6,18 @@ import click
 
 from dit.core.config import init_config, load_config
 from dit.core.errors import RepoError
-from dit.core.githook import install_hook
+from dit.core.precommit import install_hook
 from dit.core.repo import DIT_DIR_NAME, find_repo
 
 
 @click.command("init")
 @click.option("--bucket", help="S3 バケット名（新規作成時）")
 @click.option("--prefix", help="バケット内のキープレフィックス（新規作成時）")
-@click.option("--force-hook", is_flag=True, help="管理外の pre-commit フックを上書きする")
 def init_cmd(
     bucket: str | None,
     prefix: str | None,
-    *,
-    force_hook: bool,
 ) -> None:
-    """dit.toml / .dit/ / pre-commit フックを初期化する."""
+    """dit.toml / .dit/ / pre-commit 設定を初期化する."""
     repo = find_repo()
     if not (repo.root / ".git").exists():
         msg = f"not a git repository: {repo.root}"
@@ -44,8 +41,5 @@ def init_cmd(
         gitignore.write_text("*\n", encoding="utf-8")
         click.echo(f"wrote {gitignore}")
 
-    try:
-        hook = install_hook(repo.root, force=force_hook)
-        click.echo(f"installed hook: {hook}")
-    except FileExistsError as exc:
-        raise click.ClickException(str(exc)) from exc
+    config = install_hook(repo.root)
+    click.echo(f"updated pre-commit config: {config}")
