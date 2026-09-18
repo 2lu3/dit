@@ -111,6 +111,8 @@ def test_sync_pushes_in_scope(tmp_path: Path) -> None:
 def test_sync_ignores_out_of_scope(tmp_path: Path) -> None:
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
     repo = _init_repo(tmp_path)
+    (repo.root / "keep").mkdir()
+    Scope(repo).add(repo.root / "keep")
     target = _write_tracked(repo, "other", "a.dcd", b"payload")
     write_pointer(
         repo.root,
@@ -142,6 +144,8 @@ def test_push_skips_out_of_scope(tmp_path: Path) -> None:
     Scope(repo).add(repo.root / "keep")
     run_add(repo, quiet=True)
     Scope(repo).remove(repo.root / "keep")
+    (repo.root / "other").mkdir()
+    Scope(repo).add(repo.root / "other")
 
     assert run_push(repo, dry_run=False) == []
     assert target.is_file()

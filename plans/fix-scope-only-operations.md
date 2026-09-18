@@ -15,7 +15,7 @@ Issue: https://github.com/2lu3/dit/issues/12
 | `dit push` | scope 内のみ（docstring と実装を一致） |
 | `dit sync` | scope 外は早期スキップ |
 | `dit status` | scope 外は hash せず `S` / `.` 表示のみ |
-| 空 scope | すべて no-op（`contains` が常に False） |
+| 未指定／空 scope | リポジトリ全体を対象（`contains` が常に True） |
 
 ## Classification（更新後）
 

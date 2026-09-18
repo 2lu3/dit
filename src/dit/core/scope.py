@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import tomli_w
@@ -55,10 +55,16 @@ class Scope:
 
     def contains(self, rel_path: str) -> bool:
         """相対パスが scope 内かを返す."""
-        if not self._directories:
+        path = PurePosixPath(rel_path)
+        if path.is_absolute() or ".." in path.parts:
             return False
+        if not self._directories:
+            return True
         for directory in self._directories:
-            if rel_path == directory or rel_path.startswith(directory.rstrip("/") + "/"):
+            if (
+                directory in (".", rel_path)
+                or rel_path.startswith(directory.rstrip("/") + "/")
+            ):
                 return True
         return False
 
