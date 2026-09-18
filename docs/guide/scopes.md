@@ -10,6 +10,8 @@ scopeは、このマシンで大容量ファイルの実体を保持するディ
 $ dit scope add data/production
 ```
 
+リポジトリ全体を scope にする場合は、リポジトリのルートで `dit scope add .` を実行します。
+
 ## 確認する
 
 ```console

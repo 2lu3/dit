@@ -99,6 +99,12 @@ def test_scope_contains(git_repo: Repo) -> None:
     assert not scope.contains("data/01_min/a.dcd")
 
 
+def test_scope_root_contains_files(git_repo: Repo) -> None:
+    scope = Scope(git_repo)
+    assert scope.add(git_repo.root) == "."
+    assert scope.contains("data/a.dcd")
+
+
 @mock_aws
 def test_s3_remote_upload_download(tmp_path: Path) -> None:
     bucket = "test-bucket"

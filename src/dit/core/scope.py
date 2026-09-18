@@ -61,7 +61,10 @@ class Scope:
         if not self._directories:
             return True
         for directory in self._directories:
-            if rel_path == directory or rel_path.startswith(directory.rstrip("/") + "/"):
+            if (
+                directory in (".", rel_path)
+                or rel_path.startswith(directory.rstrip("/") + "/")
+            ):
                 return True
         return False
 
