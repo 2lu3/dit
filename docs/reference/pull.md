@@ -2,7 +2,7 @@
 
 欠落しているオブジェクトを scope 内からダウンロードする.
 
-転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示する.
+転送計画中はポインタ一覧の作成中にスピナーを表示し、各ポインタの確認数を進捗表示する。対象確定後の転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示する.
 
 ```console
 $ dit pull [OPTIONS]
