@@ -27,4 +27,4 @@ $ dit sync
 
 ## 低レベル転送
 
-`dit push` と `dit pull` は転送方向を明示したい場合の低レベル操作です。転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。通常は一致確認を含む `dit sync` を使います（転送進捗の表示は同じです）。remoteの孤児を削除する `dit sync --prune-remote` は通常の同期には必要ありません。
+`dit push` と `dit pull` は転送方向を明示したい場合の低レベル操作です。計画中はポインタ一覧の作成中にスピナーを表示し、各ポインタの確認数を進捗表示します。対象確定後の転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。通常は一致確認を含む `dit sync` を使います（転送進捗の表示は同じです）。remoteの孤児を削除する `dit sync --prune-remote` は通常の同期には必要ありません。

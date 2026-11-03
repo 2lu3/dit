@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import click
 
-from dit.command.progress import ByteTransferBar
+from dit.command.progress import ByteTransferBar, PlanProgressBar
 from dit.core.repo import require_initialized
 from dit.core.sync_service import (
     SyncAction,
@@ -21,11 +21,11 @@ from dit.core.sync_service import (
 
 if TYPE_CHECKING:
     from dit.core.repo import Repo
-    from dit.core.sync_service import SyncResult, TransferJob, TransferProgress
+    from dit.core.sync_service import PlanProgress, SyncResult, TransferJob, TransferProgress
 
 
 class _TransferPlan(Protocol):
-    def __call__(self, repo: Repo) -> list[TransferJob]: ...
+    def __call__(self, repo: Repo, *, progress: PlanProgress) -> list[TransferJob]: ...
 
 
 class _TransferExecute(Protocol):
@@ -61,7 +61,8 @@ def _run_byte_transfer(
     execute: _TransferExecute,
 ) -> list[SyncResult]:
     repo = require_initialized()
-    jobs = plan(repo)
+    with PlanProgressBar(title) as progress:
+        jobs = plan(repo, progress=progress)
     total_bytes = sum(job.size for job in jobs)
     if dry_run or total_bytes == 0:
         return execute(repo, dry_run=dry_run, jobs=jobs)

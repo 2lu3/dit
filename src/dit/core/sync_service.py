@@ -94,6 +94,18 @@ class TransferProgress(Protocol):
         ...
 
 
+class PlanProgress(Protocol):
+    """転送計画のポインタ確認進捗."""
+
+    def set_total(self, total_files: int) -> None:
+        """確認するポインタの総数を設定する."""
+        ...
+
+    def advance(self) -> None:
+        """確認済みポインタを 1 件加算する."""
+        ...
+
+
 @dataclass
 class SyncStep:
     """計画済みの同期 1 件."""
@@ -113,16 +125,16 @@ def require_remote(config: DitConfig) -> Remote:
     return open_remote(config.remote)
 
 
-def plan_push(repo: Repo) -> list[TransferJob]:
+def plan_push(repo: Repo, *, progress: PlanProgress | None = None) -> list[TransferJob]:
     """アップロード対象を収集する."""
     config = load_config(repo)
     remote = require_remote(config)
-    return collect_push_jobs(repo, remote, Scope(repo))
+    return collect_push_jobs(repo, remote, Scope(repo), progress=progress)
 
 
-def plan_pull(repo: Repo) -> list[TransferJob]:
+def plan_pull(repo: Repo, *, progress: PlanProgress | None = None) -> list[TransferJob]:
     """ダウンロード対象を収集する."""
-    return collect_pull_jobs(repo, Scope(repo))
+    return collect_pull_jobs(repo, Scope(repo), progress=progress)
 
 
 def plan_sync(repo: Repo) -> list[SyncStep]:
@@ -149,16 +161,45 @@ def collect_sync_jobs(steps: list[SyncStep]) -> list[TransferJob]:
     ]
 
 
-def collect_push_jobs(repo: Repo, remote: Remote, scope: Scope) -> list[TransferJob]:
+def collect_push_jobs(
+    repo: Repo,
+    remote: Remote,
+    scope: Scope,
+    *,
+    progress: PlanProgress | None = None,
+) -> list[TransferJob]:
     """Scope 内で未アップロードの実体を列挙する."""
-    jobs = [_push_job(repo, remote, scope, read_pointer(path)) for path in iter_pointer_files(repo)]
-    return [job for job in jobs if job is not None]
+    pointer_files = iter_pointer_files(repo)
+    if progress is not None:
+        progress.set_total(len(pointer_files))
+    jobs: list[TransferJob] = []
+    for path in pointer_files:
+        job = _push_job(repo, remote, scope, read_pointer(path))
+        if job is not None:
+            jobs.append(job)
+        if progress is not None:
+            progress.advance()
+    return jobs
 
 
-def collect_pull_jobs(repo: Repo, scope: Scope) -> list[TransferJob]:
+def collect_pull_jobs(
+    repo: Repo,
+    scope: Scope,
+    *,
+    progress: PlanProgress | None = None,
+) -> list[TransferJob]:
     """Scope 内で欠落している実体を列挙する."""
-    jobs = [_pull_job(repo, scope, read_pointer(path)) for path in iter_pointer_files(repo)]
-    return [job for job in jobs if job is not None]
+    pointer_files = iter_pointer_files(repo)
+    if progress is not None:
+        progress.set_total(len(pointer_files))
+    jobs: list[TransferJob] = []
+    for path in pointer_files:
+        job = _pull_job(repo, scope, read_pointer(path))
+        if job is not None:
+            jobs.append(job)
+        if progress is not None:
+            progress.advance()
+    return jobs
 
 
 def _push_job(

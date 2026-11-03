@@ -110,7 +110,7 @@ dit sync
 | `dit init` | `dit.toml` / `.dit/` / pre-commit 設定を初期化 |
 | `dit add` | scope 内で `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
 | `dit status` | 変更・未追跡・要 pull などを表示 |
-| `dit push` / `dit pull` | scope 内の低レベル転送。進捗は K/M/Gbyte の N/N |
+| `dit push` / `dit pull` | scope 内の低レベル転送。計画中はスピナーとポインタ確認数、転送中は K/M/Gbyte の N/N |
 | `dit sync` | 日常の同期（scope 内のみ）。転送進捗は K/M/Gbyte の N/N。`--dry-run` / `--prune-remote` |
 | `dit scope add\|remove\|list` | このマシンで実体を持つディレクトリ |
 | `dit hook install\|uninstall\|status` | pre-commit 設定内の dit hook 管理 |

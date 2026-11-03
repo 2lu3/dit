@@ -8,7 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from dit.command.progress import ByteTransferBar
+from dit.command.progress import ByteTransferBar, PlanProgressBar
 from dit.core.add_service import run_add
 from dit.core.config import RemoteConfig, init_config
 from dit.core.hasher import hash_file
@@ -62,6 +62,15 @@ def test_byte_transfer_bar_ignores_non_positive_deltas() -> None:
     assert "0.0byte/1Mbyte" in _visible(buf)
 
 
+def test_plan_progress_bar_reports_checked_file_count() -> None:
+    buf = io.StringIO()
+    with PlanProgressBar("push", stream=buf) as bar:
+        bar.set_total(2)
+        bar.advance()
+
+    assert "1file/2file" in _visible(buf)
+
+
 @mock_aws
 def test_s3_upload_and_download_report_transferred_bytes(tmp_path: Path) -> None:
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
@@ -98,15 +107,31 @@ def test_plan_push_and_pull_use_file_and_pointer_sizes(tmp_path: Path) -> None:
     target.write_bytes(b"payload-size")
     Scope(repo).add(keep)
     run_add(repo, quiet=True)
-    push_jobs = plan_push(repo)
+    push_progress = _PlanProgressCapture()
+    push_jobs = plan_push(repo, progress=push_progress)
     assert [job.size for job in push_jobs] == [len(b"payload-size")]
     assert [job.path for job in push_jobs] == ["keep/a.dcd"]
+    assert (push_progress.total, push_progress.completed) == (1, 1)
 
     run_push(repo, dry_run=False)
     target.unlink()
-    pull_jobs = plan_pull(repo)
+    pull_progress = _PlanProgressCapture()
+    pull_jobs = plan_pull(repo, progress=pull_progress)
     assert [job.size for job in pull_jobs] == [len(b"payload-size")]
     assert [job.path for job in pull_jobs] == ["keep/a.dcd"]
+    assert (pull_progress.total, pull_progress.completed) == (1, 1)
+
+
+class _PlanProgressCapture:
+    def __init__(self) -> None:
+        self.total: int | None = None
+        self.completed = 0
+
+    def set_total(self, total_files: int) -> None:
+        self.total = total_files
+
+    def advance(self) -> None:
+        self.completed += 1
 
 
 @mock_aws
