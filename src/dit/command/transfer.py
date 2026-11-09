@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 import click
 
 from dit.command.progress import ByteTransferBar, PlanProgressBar
+from dit.core.errors import DitError
 from dit.core.repo import require_initialized
 from dit.core.sync_service import (
     SyncAction,
@@ -84,7 +85,7 @@ def push_cmd(*, dry_run: bool) -> None:
             plan=plan_push,
             execute=run_push,
         )
-    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+    except (DitError, FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
     _finish(results)
 
@@ -103,14 +104,15 @@ def pull_cmd(*, dry_run: bool) -> None:
             plan=plan_pull,
             execute=run_pull,
         )
-    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+    except (DitError, FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
     _finish(results)
 
 
 def _run_sync(*, dry_run: bool, prune_remote: bool) -> list[SyncResult]:
     repo = require_initialized()
-    steps = plan_sync(repo)
+    with PlanProgressBar("sync") as progress:
+        steps = plan_sync(repo, progress=progress)
     total_bytes = sum(job.size for job in collect_sync_jobs(steps))
     if dry_run or total_bytes == 0:
         return run_sync(repo, dry_run=dry_run, prune_remote=prune_remote, steps=steps)
@@ -132,6 +134,6 @@ def sync_cmd(*, dry_run: bool, prune_remote: bool) -> None:
     """
     try:
         results = _run_sync(dry_run=dry_run, prune_remote=prune_remote)
-    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+    except (DitError, FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
     _finish(results)

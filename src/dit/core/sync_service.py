@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
@@ -95,14 +96,14 @@ class TransferProgress(Protocol):
 
 
 class PlanProgress(Protocol):
-    """転送計画のポインタ確認進捗."""
+    """転送計画のファイル確認進捗."""
 
     def set_total(self, total_files: int) -> None:
-        """確認するポインタの総数を設定する."""
+        """確認するファイルの総数を設定する."""
         ...
 
     def advance(self) -> None:
-        """確認済みポインタを 1 件加算する."""
+        """確認済みファイルを 1 件加算する."""
         ...
 
 
@@ -112,6 +113,15 @@ class SyncStep:
 
     result: SyncResult
     transfer: TransferJob | None = None
+
+
+@dataclass
+class _RemoteCheck:
+    """リモートの存在確認後に選ぶ同期ステップ."""
+
+    content_hash: str
+    if_present: list[SyncStep]
+    if_missing: list[SyncStep]
 
 
 _TRANSFER_ACTIONS = frozenset({SyncAction.PUSH, SyncAction.PULL})
@@ -137,7 +147,7 @@ def plan_pull(repo: Repo, *, progress: PlanProgress | None = None) -> list[Trans
     return collect_pull_jobs(repo, Scope(repo), progress=progress)
 
 
-def plan_sync(repo: Repo) -> list[SyncStep]:
+def plan_sync(repo: Repo, *, progress: PlanProgress | None = None) -> list[SyncStep]:
     """同期の更新と転送を計画する."""
     config = load_config(repo)
     remote = require_remote(config)
@@ -149,7 +159,7 @@ def plan_sync(repo: Repo) -> list[SyncStep]:
             scope=Scope(repo),
             dry_run=True,
         )
-        return _plan_all(ctx, config)
+        return _plan_all(ctx, config, progress=progress)
 
 
 def collect_sync_jobs(steps: list[SyncStep]) -> list[TransferJob]:
@@ -174,12 +184,28 @@ def collect_push_jobs(
         progress.set_total(len(pointer_files))
     jobs: list[TransferJob] = []
     for path in pointer_files:
-        job = _push_job(repo, remote, scope, read_pointer(path))
+        job = _push_job(repo, scope, read_pointer(path))
         if job is not None:
             jobs.append(job)
-        if progress is not None:
+        elif progress is not None:
             progress.advance()
-    return jobs
+    presence = _check_remote_hashes(remote, [job.content_hash for job in jobs], progress)
+    return [job for job in jobs if not presence[job.content_hash]]
+
+
+def _check_remote_hashes(
+    remote: Remote,
+    content_hashes: list[str],
+    progress: PlanProgress | None,
+) -> dict[str, bool]:
+    counts = Counter(content_hashes)
+
+    def checked(content_hash: str) -> None:
+        if progress is not None:
+            for _ in range(counts[content_hash]):
+                progress.advance()
+
+    return remote.exists_many(content_hashes, on_checked=checked)
 
 
 def collect_pull_jobs(
@@ -204,14 +230,13 @@ def collect_pull_jobs(
 
 def _push_job(
     repo: Repo,
-    remote: Remote,
     scope: Scope,
     pointer: Pointer,
 ) -> TransferJob | None:
     if not scope.contains(pointer.path):
         return None
     data_path = repo.abs(pointer.path)
-    if not data_path.is_file() or remote.exists(pointer.hash):
+    if not data_path.is_file():
         return None
     return TransferJob(
         path=pointer.path,
@@ -288,17 +313,23 @@ def run_pull(
     pending = jobs if jobs is not None else collect_pull_jobs(repo, Scope(repo))
     if dry_run:
         return [SyncResult(job.path, SyncAction.PULL, "download") for job in pending]
-    return [_download_job(remote, job, progress) for job in pending]
+    _download_jobs(repo, remote, pending, progress)
+    return [SyncResult(job.path, SyncAction.PULL, "download") for job in pending]
 
 
-def _download_job(
+def _download_jobs(
+    repo: Repo,
     remote: Remote,
-    job: TransferJob,
+    jobs: list[TransferJob],
     progress: TransferProgress | None,
-) -> SyncResult:
-    _notify_path(progress, job.path)
-    remote.download(job.content_hash, job.data_path, progress=_byte_callback(progress))
-    return SyncResult(job.path, SyncAction.PULL, "download")
+) -> None:
+    if not jobs:
+        return
+    remote.download_many(
+        [(job.content_hash, job.data_path) for job in jobs],
+        progress=_byte_callback(progress),
+        on_start=lambda path: _notify_path(progress, repo.rel(path)),
+    )
 
 
 def run_sync(
@@ -321,14 +352,39 @@ def run_sync(
             dry_run=dry_run,
         )
         pending = steps if steps is not None else _plan_all(ctx, config)
-        results = [_apply_step(ctx, step, progress) for step in pending]
+        results = _apply_steps(ctx, pending, progress)
         if prune_remote:
             results.extend(_prune_remote_orphans(repo, remote, dry_run=dry_run))
     return results
 
 
-def _plan_all(ctx: SyncCtx, config: DitConfig) -> list[SyncStep]:
-    return [step for item in _iter_sync_items(ctx.repo, config) for step in _plan_item(ctx, item)]
+def _plan_all(
+    ctx: SyncCtx,
+    config: DitConfig,
+    *,
+    progress: PlanProgress | None = None,
+) -> list[SyncStep]:
+    items = _iter_sync_items(ctx.repo, config)
+    if progress is not None:
+        progress.set_total(len(items))
+    plans: list[list[SyncStep] | _RemoteCheck] = []
+    for item in items:
+        plan = _plan_item(ctx, item)
+        plans.append(plan)
+        if not isinstance(plan, _RemoteCheck) and progress is not None:
+            progress.advance()
+    presence = _check_remote_hashes(
+        ctx.remote,
+        [plan.content_hash for plan in plans if isinstance(plan, _RemoteCheck)],
+        progress,
+    )
+    steps: list[SyncStep] = []
+    for plan in plans:
+        if isinstance(plan, _RemoteCheck):
+            steps.extend(plan.if_present if presence[plan.content_hash] else plan.if_missing)
+        else:
+            steps.extend(plan)
+    return steps
 
 
 def _load_pointers(repo: Repo) -> dict[str, Pointer]:
@@ -364,47 +420,37 @@ def _transfer_step(
     return SyncStep(SyncResult(item.rel, action, message), job)
 
 
-def _plan_item(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:
+def _plan_item(ctx: SyncCtx, item: SyncItem) -> list[SyncStep] | _RemoteCheck:
     if not ctx.scope.contains(item.rel):
         return []
     has_data = item.data_path.is_file()
     if item.pointer is not None and has_data:
         return _plan_both(ctx, item)
     if item.pointer is not None:
-        return _plan_pointer_only(ctx, item)
+        return _plan_pointer_only(item)
     if has_data:
         return [_status_step(item, SyncAction.WARNING, "missing pointer or untracked")]
     return []
 
 
-def _plan_both(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:
+def _plan_both(ctx: SyncCtx, item: SyncItem) -> _RemoteCheck:
     pointer = _require_pointer(item)
     local_hash = resolve_content_hash(ctx.repo, ctx.index, item.data_path)
     if local_hash == pointer.hash:
-        return _plan_after_active(ctx, item, pointer.hash, pointer.size)
+        return _plan_after_active(item, pointer.hash, pointer.size)
     return _plan_both_mismatch(ctx, item, local_hash)
 
 
 def _plan_after_active(
-    ctx: SyncCtx,
     item: SyncItem,
     content_hash: str,
     size: int,
-) -> list[SyncStep]:
-    steps = _plan_push_if_needed(ctx, item, content_hash, size)
-    return steps or [_status_step(item, SyncAction.OK, "in sync")]
-
-
-def _plan_push_if_needed(
-    ctx: SyncCtx,
-    item: SyncItem,
-    content_hash: str,
-    size: int,
-) -> list[SyncStep]:
-    remote_has = ctx.remote.exists(content_hash)
-    if not has_local_needing_push(item.data_path, remote_has=remote_has):
-        return []
-    return [_transfer_step(item, SyncAction.PUSH, "upload", content_hash, size)]
+) -> _RemoteCheck:
+    return _RemoteCheck(
+        content_hash,
+        if_present=[_status_step(item, SyncAction.OK, "in sync")],
+        if_missing=[_transfer_step(item, SyncAction.PUSH, "upload", content_hash, size)],
+    )
 
 
 def _is_local_newer(ctx: SyncCtx, item: SyncItem) -> bool:
@@ -414,32 +460,53 @@ def _is_local_newer(ctx: SyncCtx, item: SyncItem) -> bool:
     return data_mtime >= pointer_mtime
 
 
-def _plan_both_mismatch(ctx: SyncCtx, item: SyncItem, local_hash: str) -> list[SyncStep]:
+def _plan_both_mismatch(ctx: SyncCtx, item: SyncItem, local_hash: str) -> _RemoteCheck:
     pointer = _require_pointer(item)
     if _is_local_newer(ctx, item):
         size = item.data_path.stat().st_size
         updated = _transfer_step(item, SyncAction.UPDATE_POINTER, "local newer", local_hash, size)
-        return [updated, *_plan_push_if_needed(ctx, item, local_hash, size)]
-    if not ctx.remote.exists(pointer.hash):
-        return [_status_step(item, SyncAction.ERROR, "pointer newer but remote missing")]
-    return [_transfer_step(item, SyncAction.PULL, "pointer newer", pointer.hash, pointer.size)]
+        return _RemoteCheck(
+            local_hash,
+            if_present=[updated],
+            if_missing=[updated, _transfer_step(item, SyncAction.PUSH, "upload", local_hash, size)],
+        )
+    return _RemoteCheck(
+        pointer.hash,
+        if_present=[
+            _transfer_step(item, SyncAction.PULL, "pointer newer", pointer.hash, pointer.size)
+        ],
+        if_missing=[_status_step(item, SyncAction.ERROR, "pointer newer but remote missing")],
+    )
 
 
-def _plan_pointer_only(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:
+def _plan_pointer_only(item: SyncItem) -> _RemoteCheck:
     pointer = _require_pointer(item)
-    if not ctx.remote.exists(pointer.hash):
-        return [_status_step(item, SyncAction.ERROR, "file not found locally or remotely")]
-    return [_transfer_step(item, SyncAction.PULL, "download", pointer.hash, pointer.size)]
+    return _RemoteCheck(
+        pointer.hash,
+        if_present=[_transfer_step(item, SyncAction.PULL, "download", pointer.hash, pointer.size)],
+        if_missing=[_status_step(item, SyncAction.ERROR, "file not found locally or remotely")],
+    )
 
 
-def _apply_step(
+def _apply_steps(
     ctx: SyncCtx,
-    step: SyncStep,
+    steps: list[SyncStep],
     progress: TransferProgress | None,
-) -> SyncResult:
+) -> list[SyncResult]:
     if not ctx.dry_run:
-        _execute_step(ctx, step, progress)
-    return step.result
+        downloads: list[TransferJob] = []
+        for step in steps:
+            if step.transfer is None:
+                continue
+            if step.result.action == SyncAction.PULL:
+                downloads.append(step.transfer)
+                continue
+            # pointer 更新や push より前に、それまでの pull を完了させる。
+            _download_jobs(ctx.repo, ctx.remote, downloads, progress)
+            downloads.clear()
+            _execute_step(ctx, step, progress)
+        _download_jobs(ctx.repo, ctx.remote, downloads, progress)
+    return [step.result for step in steps]
 
 
 def _execute_step(
@@ -457,13 +524,6 @@ def _execute_step(
     if action == SyncAction.PUSH:
         _upload_job(ctx.remote, ctx.index, job, progress)
         return
-    if action == SyncAction.PULL:
-        _download_job(ctx.remote, job, progress)
-
-
-def has_local_needing_push(data_path: Path, *, remote_has: bool) -> bool:
-    """ローカル実体がありリモートにオブジェクトが無いとき True を返す."""
-    return data_path.is_file() and not remote_has
 
 
 def _require_pointer(item: SyncItem) -> Pointer:
