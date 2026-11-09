@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import boto3
 import pytest
+from click.testing import CliRunner
 from moto import mock_aws
 
 from dit.command.progress import ByteTransferBar, PlanProgressBar
@@ -16,6 +17,7 @@ from dit.core.remote.s3 import S3Remote
 from dit.core.repo import Repo
 from dit.core.scope import Scope
 from dit.core.sync_service import collect_sync_jobs, plan_pull, plan_push, plan_sync, run_push
+from dit.main import cli
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -151,13 +153,47 @@ def test_plan_sync_jobs_use_file_and_pointer_sizes(tmp_path: Path) -> None:
     target.write_bytes(payload)
     Scope(repo).add(keep)
     run_add(repo, quiet=True)
-    push_jobs = collect_sync_jobs(plan_sync(repo))
+    progress = _PlanProgressCapture()
+    push_jobs = collect_sync_jobs(plan_sync(repo, progress=progress))
     assert [job.size for job in push_jobs] == [len(payload)]
     assert [job.path for job in push_jobs] == ["keep/a.dcd"]
+    assert (progress.total, progress.completed) == (1, 1)
 
     run_push(repo, dry_run=False)
-    assert collect_sync_jobs(plan_sync(repo)) == []
+    progress = _PlanProgressCapture()
+    assert collect_sync_jobs(plan_sync(repo, progress=progress)) == []
+    assert (progress.total, progress.completed) == (1, 1)
     target.unlink()
-    pull_jobs = collect_sync_jobs(plan_sync(repo))
+    progress = _PlanProgressCapture()
+    pull_jobs = collect_sync_jobs(plan_sync(repo, progress=progress))
     assert [job.size for job in pull_jobs] == [len(payload)]
     assert [job.path for job in pull_jobs] == ["keep/a.dcd"]
+    assert (progress.total, progress.completed) == (1, 1)
+
+
+@mock_aws
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_sync_shows_planning_progress_when_no_transfer_is_needed(
+    tmp_path: Path, monkeypatch, dry_run
+):
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".dit").mkdir()
+    init_config(bucket="test-bucket", prefix="md").save(tmp_path / "dit.toml")
+    repo = Repo(root=tmp_path)
+    (tmp_path / "a.dcd").write_bytes(b"already in sync")
+    run_add(repo, quiet=True)
+    run_push(repo)
+    monkeypatch.chdir(tmp_path)
+    display = io.StringIO()
+    monkeypatch.setattr(
+        "dit.command.transfer.PlanProgressBar",
+        lambda title: PlanProgressBar(title, stream=display),
+    )
+
+    result = CliRunner().invoke(cli, ["sync", *(["--dry-run"] if dry_run else [])])
+
+    assert result.exit_code == 0, result.output
+    assert "sync plan" in _visible(display)
+    assert "1file/1file" in _visible(display)
+    assert "in sync" in result.output

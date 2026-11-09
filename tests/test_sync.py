@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -10,8 +11,10 @@ from click.testing import CliRunner
 from moto import mock_aws
 
 from dit.core.add_service import run_add
-from dit.core.config import init_config
+from dit.core.config import RemoteConfig, init_config
+from dit.core.errors import RemoteError
 from dit.core.pointer import Pointer, read_pointer, write_pointer
+from dit.core.remote.s3 import S3Remote
 from dit.core.repo import Repo
 from dit.core.scope import Scope
 from dit.core.sync_service import SyncAction, run_pull, run_push, run_sync
@@ -38,6 +41,7 @@ def dit_remote_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DIT_ACCESS_KEY", "testing")
     monkeypatch.setenv("DIT_SECRET_KEY", "testing")
     monkeypatch.setenv("DIT_ENDPOINT_URL", "https://s3.amazonaws.com")
+    monkeypatch.delenv("DIT_TRANSFER_CONCURRENCY", raising=False)
 
 
 def _init_repo(tmp_path: Path) -> Repo:
@@ -90,6 +94,39 @@ def test_transfer_loads_root_dotenv(tmp_path: Path, monkeypatch, command, existi
         assert kwargs["aws_access_key_id"] == ("testing" if existing_env else "file-access")
         assert kwargs["aws_secret_access_key"] == "file-secret # literal"  # noqa: S105 — test credential
         assert kwargs["endpoint_url"] == "https://storage.example.com"
+
+
+@pytest.mark.parametrize("command", ["push", "pull", "sync"])
+@pytest.mark.parametrize("existing_env", [None, "8"])
+def test_transfer_concurrency_loads_root_dotenv(
+    tmp_path: Path, monkeypatch, command, existing_env
+) -> None:
+    repo = _init_repo(tmp_path)
+    (repo.root / ".env").write_text("DIT_TRANSFER_CONCURRENCY=24\n", encoding="utf-8")
+    if existing_env is not None:
+        monkeypatch.setenv("DIT_TRANSFER_CONCURRENCY", existing_env)
+    monkeypatch.chdir(repo.root)
+    client = Mock()
+    monkeypatch.setattr(boto3, "client", client)
+
+    result = CliRunner().invoke(cli, [command, "--dry-run"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    client.assert_called()
+    for call in client.call_args_list:
+        assert call.kwargs["config"].max_pool_connections == int(existing_env or "24")
+
+
+@pytest.mark.parametrize("command", ["push", "pull", "sync"])
+def test_transfer_rejects_invalid_concurrency(tmp_path: Path, monkeypatch, command) -> None:
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo.root)
+    monkeypatch.setenv("DIT_TRANSFER_CONCURRENCY", "0")
+
+    result = CliRunner().invoke(cli, [command], catch_exceptions=False)
+
+    assert result.exit_code == 1
+    assert "Error: DIT_TRANSFER_CONCURRENCY must be a positive integer" in result.output
 
 
 @mock_aws
@@ -241,3 +278,83 @@ def test_sync_reports_combined_push_and_pull_progress(tmp_path: Path) -> None:
     assert SyncAction.PUSH in actions
     assert sorted(progress.paths) == ["keep/a.dcd", "keep/b.dcd"]
     assert sum(progress.amounts) == len(b"aaa-payload") + len(b"bbb-payload")
+
+
+@mock_aws
+@pytest.mark.parametrize("run", [run_pull, run_sync])
+def test_downloads_run_concurrently_in_scope(tmp_path: Path, monkeypatch, run) -> None:
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    (repo.root / "keep").mkdir()
+    Scope(repo).add(repo.root / "keep")
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    monkeypatch.setattr("dit.core.sync_service.require_remote", lambda config: remote)
+    paths = ["keep/a.dcd", "keep/b.dcd", "other/c.dcd"]
+    for i, path in enumerate(paths):
+        content_hash = f"blake3:{i:064x}"
+        payload = bytes([i]) * 1024
+        client.put_object(Bucket="test-bucket", Key=remote.object_key(content_hash), Body=payload)
+        write_pointer(repo.root, Pointer(path=path, hash=content_hash, size=len(payload)))
+    barrier = threading.Barrier(2)
+
+    def wait_for_other_file(**kwargs):
+        barrier.wait(timeout=5)
+
+    remote._client.meta.events.register("before-call.s3.GetObject", wait_for_other_file)
+    progress = _ProgressCapture()
+
+    results = run(repo, progress=progress)
+
+    assert [result.path for result in results] == paths[:2]
+    assert all(result.action == SyncAction.PULL for result in results)
+    assert sorted(progress.paths) == paths[:2]
+    assert sum(progress.amounts) == 2048
+    assert (repo.root / paths[0]).read_bytes() == b"\0" * 1024
+    assert (repo.root / paths[1]).read_bytes() == b"\1" * 1024
+    assert not (repo.root / paths[2]).exists()
+
+
+@mock_aws
+@pytest.mark.parametrize("run", [run_pull, run_sync])
+def test_download_dry_run_does_not_start_transfers(tmp_path: Path, monkeypatch, run):
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    monkeypatch.setattr("dit.core.sync_service.require_remote", lambda config: remote)
+    for i in range(2):
+        content_hash = f"blake3:{i:064x}"
+        client.put_object(Bucket="test-bucket", Key=remote.object_key(content_hash), Body=b"data")
+        write_pointer(repo.root, Pointer(path=f"{i}.dcd", hash=content_hash, size=4))
+    download_many = Mock(side_effect=AssertionError("dry-run must not download"))
+    monkeypatch.setattr(remote, "download_many", download_many)
+
+    results = run(repo, dry_run=True)
+
+    assert [result.path for result in results] == ["0.dcd", "1.dcd"]
+    assert not list(repo.root.glob("*.dcd"))
+    download_many.assert_not_called()
+
+
+@mock_aws
+def test_sync_waits_for_downloads_before_later_push(tmp_path: Path, monkeypatch):
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    monkeypatch.setattr("dit.core.sync_service.require_remote", lambda config: remote)
+    client.put_object(Bucket="test-bucket", Key=remote.object_key("blake3:aaa"), Body=b"pull")
+    write_pointer(repo.root, Pointer(path="a.dcd", hash="blake3:aaa", size=4))
+    _write_tracked(repo, "", "b.dcd", b"push")
+    run_add(repo, quiet=True)
+    downloads = Mock(side_effect=RemoteError("download failed"))
+    uploads = Mock()
+    monkeypatch.setattr(remote, "download_many", downloads)
+    monkeypatch.setattr(remote, "upload", uploads)
+
+    with pytest.raises(RemoteError, match="download failed"):
+        run_sync(repo)
+
+    downloads.assert_called_once()
+    uploads.assert_not_called()

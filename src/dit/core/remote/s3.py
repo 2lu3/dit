@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from itertools import islice
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING, Any
 
 import boto3
+from boto3.exceptions import RetriesExceededError
+from boto3.s3.transfer import S3Transfer, TransferConfig
 from botocore.config import Config as BotoConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from dit.core.config import S3_REQUEST_TIMEOUT_SEC, RemoteConfig
 from dit.core.errors import ConfigError, RemoteError
@@ -16,11 +22,11 @@ from dit.core.remote.base import Remote
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
+    from concurrent.futures import Future
 
-MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024
-MULTIPART_CHUNKSIZE_BYTES = 16 * 1024 * 1024
-MAX_CONCURRENCY = 4
+MULTIPART_THRESHOLD_BYTES = 8 * 1024 * 1024
+MULTIPART_CHUNKSIZE_BYTES = 8 * 1024 * 1024
+DEFAULT_MAX_CONCURRENCY = 16
 HASH_KEY_PART_COUNT = 2
 
 REQUIRED_ENV_VARS = (
@@ -38,7 +44,21 @@ def _require_env_vars() -> dict[str, str]:
     return {name: os.environ[name] for name in REQUIRED_ENV_VARS}
 
 
-def _s3_client_kwargs() -> dict[str, Any]:
+def _transfer_concurrency() -> int:
+    value = os.environ.get("DIT_TRANSFER_CONCURRENCY")
+    if value is None:
+        return DEFAULT_MAX_CONCURRENCY
+    msg = "DIT_TRANSFER_CONCURRENCY must be a positive integer"
+    try:
+        concurrency = int(value)
+    except ValueError as exc:
+        raise ConfigError(msg) from exc
+    if concurrency < 1:
+        raise ConfigError(msg)
+    return concurrency
+
+
+def _s3_client_kwargs(max_concurrency: int) -> dict[str, Any]:
     """必須の DIT_* 環境変数から boto3 S3 クライアント用 kwargs を構築する."""
     env = _require_env_vars()
     return {
@@ -49,6 +69,7 @@ def _s3_client_kwargs() -> dict[str, Any]:
             connect_timeout=S3_REQUEST_TIMEOUT_SEC,
             read_timeout=S3_REQUEST_TIMEOUT_SEC,
             retries={"max_attempts": 3, "mode": "standard"},
+            max_pool_connections=max_concurrency,
         ),
     }
 
@@ -59,11 +80,14 @@ class S3Remote(Remote):
     def __init__(self, remote: RemoteConfig) -> None:
         """指定のリモート設定で S3 クライアントを作成する."""
         self.remote = remote
-        self._client = boto3.client("s3", **_s3_client_kwargs())
-        self._transfer = boto3.s3.transfer.TransferConfig(
+        concurrency = _transfer_concurrency()
+        self._client = boto3.client("s3", **_s3_client_kwargs(concurrency))
+        self._transfer = TransferConfig(
             multipart_threshold=MULTIPART_THRESHOLD_BYTES,
             multipart_chunksize=MULTIPART_CHUNKSIZE_BYTES,
-            max_concurrency=MAX_CONCURRENCY,
+            max_concurrency=concurrency,
+            # CRT は max_concurrency を無視するため、設定が反映される転送実装を使う。
+            preferred_transfer_client="classic",
         )
 
     def object_key(self, content_hash: str) -> str:
@@ -78,14 +102,50 @@ class S3Remote(Remote):
         key = self.object_key(content_hash)
         try:
             self._client.head_object(Bucket=self.remote.bucket, Key=key)
-        except ClientError as exc:
-            code = exc.response.get("Error", {}).get("Code")
-            if code in {"404", "NoSuchKey", "NotFound"}:
-                return False
+        except (BotoCoreError, ClientError) as exc:
+            if isinstance(exc, ClientError):
+                code = exc.response.get("Error", {}).get("Code")
+                if code in {"404", "NoSuchKey", "NotFound"}:
+                    return False
             msg = f"failed to head s3://{self.remote.bucket}/{key}: {exc}"
             raise RemoteError(msg) from exc
         else:
             return True
+
+    def exists_many(
+        self,
+        content_hashes: list[str],
+        *,
+        on_checked: Callable[[str], None] | None = None,
+    ) -> dict[str, bool]:
+        """重複ハッシュをまとめ、上限内で存在確認を並列に実行する."""
+        hashes = dict.fromkeys(content_hashes)
+        if not hashes:
+            return {}
+        workers = min(self._transfer.max_concurrency, len(hashes))
+        remaining = iter(hashes)
+        results: dict[str, bool] = {}
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            pending: dict[Future[bool], str] = {}
+
+            def submit_batch(count: int) -> None:
+                for content_hash in islice(remaining, count):
+                    pending[executor.submit(self.exists, content_hash)] = content_hash
+
+            try:
+                submit_batch(workers)
+                while pending:
+                    done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        content_hash = pending.pop(future)
+                        results[content_hash] = future.result()
+                        if on_checked is not None:
+                            on_checked(content_hash)
+                    submit_batch(len(done))
+            finally:
+                for future in pending:
+                    future.cancel()
+        return results
 
     def upload(
         self,
@@ -108,16 +168,79 @@ class S3Remote(Remote):
         progress: Callable[[int], None] | None = None,
     ) -> None:
         """一時ファイル経由でリモートオブジェクトをローカルパスへダウンロードする."""
+        self.download_many([(content_hash, local_path)], progress=progress)
+
+    def download_many(
+        self,
+        downloads: list[tuple[str, Path]],
+        *,
+        progress: Callable[[int], None] | None = None,
+        on_start: Callable[[Path], None] | None = None,
+    ) -> None:
+        """全ファイルで転送枠を共有し、複数ファイルを並列にダウンロードする."""
+        if not downloads:
+            return
+        paths = [path.resolve() for _, path in downloads]
+        if len(set(paths)) != len(paths):
+            msg = "duplicate download destination"
+            raise RemoteError(msg)
+        workers = min(self._transfer.max_concurrency, len(downloads))
+        remaining = iter(downloads)
+        # 例外時は転送を中断してから、ファイル単位のワーカーを終了する。
+        with (
+            ThreadPoolExecutor(max_workers=workers) as executor,
+            S3Transfer(client=self._client, config=self._transfer) as transfer,
+        ):
+
+            def submit(download: tuple[str, Path]) -> Future[None]:
+                return executor.submit(
+                    self._download_file,
+                    transfer,
+                    *download,
+                    progress=progress,
+                    on_start=on_start,
+                )
+
+            pending: set[Future[None]] = set()
+            try:
+                pending.update(submit(item) for item in islice(remaining, workers))
+                while pending:
+                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        future.result()
+                    pending.update(submit(item) for item in islice(remaining, len(done)))
+            finally:
+                for future in pending:
+                    future.cancel()
+
+    def _download_file(
+        self,
+        transfer: S3Transfer,
+        content_hash: str,
+        local_path: Path,
+        *,
+        progress: Callable[[int], None] | None,
+        on_start: Callable[[Path], None] | None,
+    ) -> None:
+        if on_start is not None:
+            on_start(local_path)
         key = self.object_key(content_hash)
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = local_path.with_suffix(local_path.suffix + ".ditdownload")
+        with NamedTemporaryFile(
+            prefix=f".{local_path.name}.",
+            suffix=".ditdownload",
+            dir=local_path.parent,
+            delete=False,
+        ) as temporary:
+            tmp = Path(temporary.name)
         try:
-            self._get_object(tmp, key, progress)
+            transfer.download_file(self.remote.bucket, key, str(tmp), callback=progress)
             tmp.replace(local_path)
-        except ClientError as exc:
-            tmp.unlink(missing_ok=True)
+        except (BotoCoreError, ClientError, RetriesExceededError) as exc:
             msg = f"failed to download s3://{self.remote.bucket}/{key} to {local_path}: {exc}"
             raise RemoteError(msg) from exc
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def _put_object(
         self,
@@ -136,20 +259,6 @@ class S3Remote(Remote):
         except ClientError as exc:
             msg = f"failed to upload {local_path} to s3://{self.remote.bucket}/{key}: {exc}"
             raise RemoteError(msg) from exc
-
-    def _get_object(
-        self,
-        dest: Path,
-        key: str,
-        progress: Callable[[int], None] | None,
-    ) -> None:
-        self._client.download_file(
-            Bucket=self.remote.bucket,
-            Key=key,
-            Filename=str(dest),
-            Config=self._transfer,
-            **_callback_kw(progress),
-        )
 
     def delete(self, content_hash: str) -> None:
         """コンテンツハッシュでリモートオブジェクトを削除する."""

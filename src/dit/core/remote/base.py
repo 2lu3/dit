@@ -18,6 +18,15 @@ class Remote(ABC):
         """指定ハッシュのオブジェクトがリモートに存在するかを返す."""
 
     @abstractmethod
+    def exists_many(
+        self,
+        content_hashes: list[str],
+        *,
+        on_checked: Callable[[str], None] | None = None,
+    ) -> dict[str, bool]:
+        """ハッシュごとの存在を確認し、確認済みハッシュを通知する."""
+
+    @abstractmethod
     def upload(
         self,
         local_path: Path,
@@ -36,6 +45,16 @@ class Remote(ABC):
         progress: Callable[[int], None] | None = None,
     ) -> None:
         """リモートオブジェクトをローカルパスへダウンロードする."""
+
+    @abstractmethod
+    def download_many(
+        self,
+        downloads: list[tuple[str, Path]],
+        *,
+        progress: Callable[[int], None] | None = None,
+        on_start: Callable[[Path], None] | None = None,
+    ) -> None:
+        """ハッシュと保存先の組を取得し、全件の完了を待つ."""
 
     @abstractmethod
     def delete(self, content_hash: str) -> None:

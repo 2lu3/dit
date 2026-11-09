@@ -57,6 +57,10 @@ DIT_ENDPOINT_URL=https://minio.example.com
 
 サブディレクトリから実行しても、リポジトリ直下の `.env` を読み込む。worktree では各 worktree 直下が対象。既存の環境変数を優先し、`.env` がなくても環境変数だけで利用できる。秘密情報を含む `.env` は `.gitignore` に追加し、コミットしない。
 
+`push` / `pull` / `sync` は、8 MiB 以上のファイルを分割し、最大16並列で転送する。`pull` と `sync` では複数ファイルも同時に取得し、ダウンロード全体でこの上限を共有する。並列数は環境変数 `DIT_TRANSFER_CONCURRENCY` または `.env` で正の整数に変更できる。回線に合わせた調整方法は[トラブルシューティング](docs/guide/troubleshooting.md#pushpull-が遅い)を参照。
+
+`push` と `sync` の準備段階でも、リモートでの存在確認を同じ並列数で行う。同じハッシュへの確認は1回にまとめる。
+
 新規リポジトリでは `dit init` に `--bucket` と `--prefix` を指定する。clone 済みで `dit.toml` がある場合は、引数なしの `dit init` で設定を読み込んで `.dit/` と `.pre-commit-config.yaml` を更新する。
 
 ## 使い方
@@ -111,7 +115,7 @@ dit sync
 | `dit add` | scope 内で `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
 | `dit status` | 変更・未追跡・要 pull などを表示 |
 | `dit push` / `dit pull` | scope 内の低レベル転送。計画中はスピナーとポインタ確認数、転送中は K/M/Gbyte の N/N |
-| `dit sync` | 日常の同期（scope 内のみ）。転送進捗は K/M/Gbyte の N/N。`--dry-run` / `--prune-remote` |
+| `dit sync` | 日常の同期（scope 内のみ）。計画中はスピナーとファイル確認数、転送中は K/M/Gbyte の N/N。`--dry-run` / `--prune-remote` |
 | `dit scope add\|remove\|list` | このマシンで実体を持つディレクトリ |
 | `dit hook install\|uninstall\|status` | pre-commit 設定内の dit hook 管理 |
 

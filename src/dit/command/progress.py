@@ -72,7 +72,7 @@ def _open_file_count_bar(
 
 
 class PlanProgressBar:
-    """ポインタ一覧の作成中はスピナー、その後は確認済み件数を表示する."""
+    """対象一覧の作成中はスピナー、その後は確認済み件数を表示する."""
 
     def __init__(self, title: str, *, stream: TextIO | None = None) -> None:
         """転送計画のタイトルと任意の出力先を設定する."""
@@ -110,7 +110,7 @@ class PlanProgressBar:
         self._bar = self._cm.__enter__()
 
     def advance(self) -> None:
-        """確認済みポインタを 1 件加算する."""
+        """確認済みファイルを 1 件加算する."""
         if self._bar is not None:
             self._bar()
 
