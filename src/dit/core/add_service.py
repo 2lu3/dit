@@ -27,7 +27,10 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
     scope = Scope(repo)
     changed = 0
     with StatIndex(repo.index_db) as index:
-        tracked = [p for p in iter_tracked_files(repo, config) if scope.contains(repo.rel(p))]
+        # ポインタの確認・更新をリンク先の実体にそろえる。
+        tracked = sorted(
+            {p.resolve() for p in iter_tracked_files(repo, config) if scope.contains(repo.rel(p))}
+        )
         tracked_rels = {repo.rel(p) for p in tracked}
         for data_path in tracked:
             digest = resolve_content_hash(repo, index, data_path)
