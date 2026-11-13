@@ -445,7 +445,11 @@ def _plan_outside_scope(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:  # noqa
     expected_path = ctx.repo.root / item.rel
     if expected_path.resolve() != expected_path.absolute() or item.data_path != expected_path:
         return [_status_step(item, SyncAction.WARNING, "kept: symbolic link")]
-    if hash_file(item.data_path) != item.pointer.hash:
+    try:
+        local_hash = hash_file(item.data_path)
+    except OSError as exc:
+        return [_status_step(item, SyncAction.WARNING, f"kept: cannot read local content: {exc}")]
+    if local_hash != item.pointer.hash:
         return [_status_step(item, SyncAction.WARNING, "kept: local content differs from pointer")]
     try:
         present = ctx.remote.exists(item.pointer.hash)

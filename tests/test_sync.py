@@ -484,6 +484,32 @@ def test_sync_keeps_unsafe_outside_scope(tmp_path: Path, monkeypatch, case: str)
 
 
 @mock_aws
+def test_sync_keeps_unreadable_outside_scope_and_pulls_inside(tmp_path: Path, monkeypatch) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    inside = _write_tracked(repo, "keep", "a.dcd", b"inside")
+    outside = _write_tracked(repo, "other", "b.dcd", b"outside")
+    run_add(repo, quiet=True)
+    run_push(repo)
+    inside.unlink()
+    Scope(repo).add(inside.parent)
+
+    def fail_outside(path):
+        if path == outside:
+            message = "permission denied"
+            raise PermissionError(message)
+        return hash_file(path)
+
+    monkeypatch.setattr("dit.core.sync_service.hash_file", fail_outside)
+    for dry_run in (True, False):
+        results = run_sync(repo, dry_run=dry_run)
+        assert [r.action for r in results] == [SyncAction.PULL, SyncAction.WARNING]
+        assert "cannot read local content" in results[1].message
+        assert outside.exists()
+    assert inside.read_bytes() == b"inside"
+
+
+@mock_aws
 @pytest.mark.parametrize("change", ["file", "remote", "scope"])
 def test_sync_rechecks_deletion_plan(tmp_path: Path, change: str) -> None:
     client = boto3.client("s3", region_name="us-east-1")
