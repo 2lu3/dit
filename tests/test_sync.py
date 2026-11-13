@@ -11,8 +11,9 @@ from click.testing import CliRunner
 from moto import mock_aws
 
 from dit.core.add_service import run_add
-from dit.core.config import RemoteConfig, init_config
+from dit.core.config import DitConfig, RemoteConfig, init_config
 from dit.core.errors import RemoteError
+from dit.core.hasher import hash_file
 from dit.core.pointer import Pointer, read_pointer, write_pointer
 from dit.core.remote.s3 import S3Remote
 from dit.core.repo import Repo
@@ -171,6 +172,65 @@ def test_add_only_updates_in_scope(tmp_path: Path) -> None:
     assert run_add(repo, quiet=True) == 1
     assert (in_scope.parent / "a.dcd.dit").is_file()
     assert not (out_scope.parent / "b.dcd.dit").is_file()
+
+
+@pytest.mark.parametrize("prune", [False, True])
+def test_add_symlink_reuses_target_pointer(tmp_path: Path, monkeypatch, *, prune: bool) -> None:
+    repo = _init_repo(tmp_path)
+    target = _write_tracked(repo, "fitted_string_20ps", "image_1.rst", b"restart")
+    assert run_add(repo, quiet=True) == 1
+    pointer_path = target.parent / "image_1.rst.dit"
+    pointer_bytes = pointer_path.read_bytes()
+    pointer_mtime = pointer_path.stat().st_mtime_ns
+    starting = repo.root / "starting"
+    starting.mkdir()
+    link = starting / "image_1.rst"
+    link.symlink_to("../fitted_string_20ps/image_1.rst")
+    git_add = Mock()
+    monkeypatch.setattr("dit.core.add_service._git_add", git_add)
+
+    assert run_add(repo, quiet=True, prune=prune) == 0
+    assert run_add(repo, quiet=True, prune=prune) == 0
+
+    git_add.assert_not_called()
+    assert pointer_path.read_bytes() == pointer_bytes
+    assert pointer_path.stat().st_mtime_ns == pointer_mtime
+    assert link.is_symlink()
+    assert not (starting / "image_1.rst.dit").exists()
+    assert not (starting / ".gitignore").exists()
+
+
+@pytest.mark.parametrize("patterns", [["*.rst"], ["starting/*.rst"]])
+def test_add_symlinks_create_and_update_target_once(tmp_path: Path, monkeypatch, patterns) -> None:
+    repo = _init_repo(tmp_path)
+    DitConfig(track_patterns=patterns).save(repo.dit_toml)
+    target = _write_tracked(repo, "fitted_string_20ps", "image_1.rst", b"restart")
+    starting = repo.root / "starting"
+    starting.mkdir()
+    links = [starting / name for name in ("absolute.rst", "relative.rst", "chained.rst")]
+    links[0].symlink_to(target)
+    links[1].symlink_to("../fitted_string_20ps/image_1.rst")
+    links[2].symlink_to(links[1].name)
+    pointer_path = target.parent / "image_1.rst.dit"
+    git_add = Mock()
+    monkeypatch.setattr("dit.core.add_service._git_add", git_add)
+
+    for payload in (b"restart", b"updated restart"):
+        target.write_bytes(payload)
+        git_add.reset_mock()
+
+        assert run_add(repo, quiet=True, prune=True) == 1
+        assert run_add(repo, quiet=True, prune=True) == 0
+
+        git_add.assert_called_once_with(repo, pointer_path)
+        assert read_pointer(pointer_path) == Pointer(
+            path="fitted_string_20ps/image_1.rst", hash=hash_file(target), size=len(payload)
+        )
+        assert all(link.is_symlink() and link.read_bytes() == payload for link in links)
+
+    assert (target.parent / ".gitignore").read_text(encoding="utf-8") == "image_1.rst\n"
+    assert not (starting / ".gitignore").exists()
+    assert list(starting.glob("*.dit")) == []
 
 
 @mock_aws
