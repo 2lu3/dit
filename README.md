@@ -1,5 +1,7 @@
 # Dit
 
+task_tracker: Linear
+
 MD 計算向けの大容量ファイル版管理ツール（DVC 非依存）。
 
 ## コンセプト
