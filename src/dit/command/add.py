@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from dit.core.add_service import run_add
+from dit.core.errors import RepoError
 from dit.core.repo import require_initialized
 
 
@@ -16,7 +17,7 @@ def add_cmd(*, quiet: bool, prune: bool) -> None:
     try:
         repo = require_initialized()
         count = run_add(repo, quiet=quiet, prune=prune)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, RepoError) as exc:
         raise click.ClickException(str(exc)) from exc
     if not quiet:
         click.echo(f"{count} pointer(s) updated")

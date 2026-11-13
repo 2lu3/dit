@@ -107,6 +107,8 @@ dit sync
 
 `dit sync` は scope 内の実体とポインタ（`*.dit`）を確認し、必要に応じて remote へ push または remote から pull します。転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示します。Git commit 時には pre-commit の dit hook が `dit add` を実行してポインタを更新・stageします。
 
+`dit add` は作成・更新・削除したポインタをまとめてステージします。Git のステージに失敗した場合は原因を解消し、変更済みのポインタを確認して手動でステージしてください。再実行時には、既に更新・削除されたポインタは処理対象になりません。
+
 ## コマンド
 
 | コマンド | 役割 |

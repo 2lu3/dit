@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -25,7 +26,7 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
     """追跡パスについてポインタを作成または更新する."""
     config = load_config(repo)
     scope = Scope(repo)
-    changed = 0
+    changed: list[Path] = []
     with StatIndex(repo.index_db) as index:
         # ポインタの確認・更新をリンク先の実体にそろえる。
         tracked = sorted({p.resolve() for p in iter_tracked_files(repo, config)})
@@ -40,13 +41,14 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
                     needs_write = False
             if needs_write:
                 pointer = write_pointer_for_file(repo, index, data_path, digest)
-                _git_add(repo, repo.root / pointer.pointer_relpath)
-                changed += 1
+                changed.append(repo.root / pointer.pointer_relpath)
                 if not quiet:
                     logger.info(f"add {pointer.path}")
         if prune:
-            changed += _prune_orphaned_pointers(repo, scope, tracked_rels, quiet=quiet)
-    return changed
+            changed.extend(_prune_orphaned_pointers(repo, scope, tracked_rels, quiet=quiet))
+    if changed:
+        _git_add(repo, changed)
+    return len(changed)
 
 
 def _prune_orphaned_pointers(
@@ -55,8 +57,8 @@ def _prune_orphaned_pointers(
     tracked_rels: set[str],
     *,
     quiet: bool,
-) -> int:
-    removed = 0
+) -> list[Path]:
+    removed: list[Path] = []
     for pointer_path in iter_pointer_files(repo):
         try:
             pointer = read_pointer(pointer_path)
@@ -67,28 +69,29 @@ def _prune_orphaned_pointers(
         if pointer.path in tracked_rels:
             continue
         pointer_path.unlink(missing_ok=True)
-        _git_add(repo, pointer_path)
-        removed += 1
+        removed.append(pointer_path)
         if not quiet:
             logger.info(f"prune {pointer.path}")
     return removed
 
 
-def _git_add(repo: Repo, path: Path) -> None:
+def _git_add(repo: Repo, paths: list[Path]) -> None:
     git = shutil.which("git")
     if git is None:
         msg = "git executable not found"
         raise RepoError(msg)
     try:
-        # git path from shutil.which; args are fixed literals plus a Path
-        subprocess.run(  # noqa: S603
-            [git, "add", "--", str(path)],
+        result = subprocess.run(  # noqa: S603
+            [git, "--literal-pathspecs", "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
             cwd=repo.root,
+            input=b"\0".join(os.fsencode(path.relative_to(repo.root)) for path in paths) + b"\0",
             check=False,
             capture_output=True,
-            text=True,
-            timeout=60,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        msg = f"git add failed for {path}: {exc}"
+    except OSError as exc:
+        msg = f"git add failed: {exc}"
         raise RepoError(msg) from exc
+    if result.returncode:
+        detail = os.fsdecode(result.stderr).strip()
+        msg = f"git add failed (exit {result.returncode}): {detail}"
+        raise RepoError(msg)
