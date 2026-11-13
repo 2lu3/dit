@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -48,7 +49,7 @@ def dit_remote_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _init_repo(tmp_path: Path) -> Repo:
     root = tmp_path / "proj"
     root.mkdir()
-    (root / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607
     (root / ".dit").mkdir()
     (root / ".dit" / ".gitignore").write_text("*\n", encoding="utf-8")
     config = init_config(bucket="test-bucket", prefix="md")
@@ -222,7 +223,7 @@ def test_add_symlinks_create_and_update_target_once(tmp_path: Path, monkeypatch,
         assert run_add(repo, quiet=True, prune=True) == 1
         assert run_add(repo, quiet=True, prune=True) == 0
 
-        git_add.assert_called_once_with(repo, pointer_path)
+        git_add.assert_called_once_with(repo, [pointer_path])
         assert read_pointer(pointer_path) == Pointer(
             path="fitted_string_20ps/image_1.rst", hash=hash_file(target), size=len(payload)
         )
