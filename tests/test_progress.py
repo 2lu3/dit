@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+import subprocess
 from typing import TYPE_CHECKING
 
 import boto3
@@ -98,7 +99,7 @@ def test_plan_push_and_pull_use_file_and_pointer_sizes(tmp_path: Path) -> None:
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
     root = tmp_path / "proj"
     root.mkdir()
-    (root / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607
     (root / ".dit").mkdir()
     config = init_config(bucket="test-bucket", prefix="md")
     config.save(root / "dit.toml")
@@ -141,7 +142,7 @@ def test_plan_sync_jobs_use_file_and_pointer_sizes(tmp_path: Path) -> None:
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
     root = tmp_path / "proj"
     root.mkdir()
-    (root / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607
     (root / ".dit").mkdir()
     config = init_config(bucket="test-bucket", prefix="md")
     config.save(root / "dit.toml")
@@ -177,7 +178,7 @@ def test_sync_shows_planning_progress_when_no_transfer_is_needed(
     tmp_path: Path, monkeypatch, dry_run
 ):
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
-    (tmp_path / ".git").mkdir()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)  # noqa: S603, S607
     (tmp_path / ".dit").mkdir()
     init_config(bucket="test-bucket", prefix="md").save(tmp_path / "dit.toml")
     repo = Repo(root=tmp_path)
