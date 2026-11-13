@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 from moto import mock_aws
 
-from dit.core.add_service import run_add
+from dit.core.add_service import _git_add as real_git_add, run_add
 from dit.core.config import DitConfig, RemoteConfig, init_config
 from dit.core.errors import RemoteError, RepoError
 from dit.core.hasher import hash_file
@@ -215,7 +215,7 @@ def test_add_symlinks_create_and_update_target_once(tmp_path: Path, monkeypatch,
     links[1].symlink_to("../fitted_string_20ps/image_1.rst")
     links[2].symlink_to(links[1].name)
     pointer_path = target.parent / "image_1.rst.dit"
-    git_add = Mock()
+    git_add = Mock(wraps=real_git_add)
     monkeypatch.setattr("dit.core.add_service._git_add", git_add)
 
     for payload in (b"restart", b"updated restart"):

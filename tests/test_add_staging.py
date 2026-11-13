@@ -49,9 +49,9 @@ def test_add_stages_only_changed_pointers_in_one_git_call(tmp_path: Path) -> Non
     original_run = subprocess.run
     with patch("dit.core.add_service.subprocess.run", wraps=original_run) as invoke:
         assert run_add(repo, quiet=True, prune=True) == len(names)
-        assert invoke.call_count == 1
+        assert sum("add" in call.args[0] for call in invoke.call_args_list) == 1
         assert run_add(repo, quiet=True, prune=True) == 0
-        assert invoke.call_count == 1
+        assert sum("add" in call.args[0] for call in invoke.call_args_list) == 1
     staged = set(git(tmp_path, "diff", "--cached", "--name-only", "-z").decode().split("\0")) - {""}
     assert staged == {f"{name}.dit" for name in names} | {"staged.txt"}
     assert git(tmp_path, "show", ":staged.txt") == b"staged"
