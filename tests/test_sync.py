@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 from moto import mock_aws
 
-from dit.core.add_service import run_add
+from dit.core.add_service import _git_add as real_git_add, run_add
 from dit.core.config import DitConfig, RemoteConfig, init_config
 from dit.core.errors import RemoteError
 from dit.core.hasher import hash_file
@@ -193,8 +193,7 @@ def test_add_symlink_reuses_target_pointer(tmp_path: Path, monkeypatch, *, prune
     assert run_add(repo, quiet=True, prune=prune) == 0
     assert run_add(repo, quiet=True, prune=prune) == 0
 
-    assert git_add.call_count == 2
-    git_add.assert_called_with(repo, pointer_path)
+    git_add.assert_not_called()
     assert pointer_path.read_bytes() == pointer_bytes
     assert pointer_path.stat().st_mtime_ns == pointer_mtime
     assert link.is_symlink()
@@ -214,7 +213,7 @@ def test_add_symlinks_create_and_update_target_once(tmp_path: Path, monkeypatch,
     links[1].symlink_to("../fitted_string_20ps/image_1.rst")
     links[2].symlink_to(links[1].name)
     pointer_path = target.parent / "image_1.rst.dit"
-    git_add = Mock()
+    git_add = Mock(wraps=real_git_add)
     monkeypatch.setattr("dit.core.add_service._git_add", git_add)
 
     for payload in (b"restart", b"updated restart"):
@@ -224,8 +223,7 @@ def test_add_symlinks_create_and_update_target_once(tmp_path: Path, monkeypatch,
         assert run_add(repo, quiet=True, prune=True) == 1
         assert run_add(repo, quiet=True, prune=True) == 0
 
-        assert git_add.call_count == 2
-        git_add.assert_called_with(repo, pointer_path)
+        git_add.assert_called_once_with(repo, [pointer_path])
         assert read_pointer(pointer_path) == Pointer(
             path="fitted_string_20ps/image_1.rst", hash=hash_file(target), size=len(payload)
         )

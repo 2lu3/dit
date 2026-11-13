@@ -86,7 +86,7 @@ def test_add_recovers_after_failure(tmp_path: Path, monkeypatch, failure: str) -
     def fail_stage(repo, path):
         nonlocal calls
         calls += 1
-        if failure == "stage" and calls == 2:
+        if failure == "stage" and calls == 1:
             msg = "injected stage failure"
             raise RuntimeError(msg)
         original_git_add(repo, path)
