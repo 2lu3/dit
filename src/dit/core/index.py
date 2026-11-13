@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -31,6 +33,7 @@ class StatIndex:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
+        self._batching = False
         self._ensure_schema()
 
     def close(self) -> None:
@@ -59,6 +62,26 @@ class StatIndex:
             """
         )
         self._conn.commit()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """更新をまとめ、例外時には未確定の変更を破棄する."""
+        if self._batching:
+            msg = "nested index transactions are not supported"
+            raise RuntimeError(msg)
+        self._batching = True
+        try:
+            yield
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
+        finally:
+            self._batching = False
+
+    def _commit_unless_batching(self) -> None:
+        if not self._batching:
+            self._conn.commit()
 
     def get(self, path: str) -> IndexEntry | None:
         """パスに対応するインデックスエントリがあれば返す."""
@@ -99,7 +122,7 @@ class StatIndex:
                 entry.pushed_at,
             ),
         )
-        self._conn.commit()
+        self._commit_unless_batching()
 
     def mark_pushed(self, path: str, pushed_at: str) -> None:
         """パスの push 時刻を記録する."""
@@ -107,12 +130,12 @@ class StatIndex:
             "UPDATE entries SET pushed_at = ? WHERE path = ?",
             (pushed_at, path),
         )
-        self._conn.commit()
+        self._commit_unless_batching()
 
     def delete(self, path: str) -> None:
         """パスのインデックスエントリを削除する."""
         self._conn.execute("DELETE FROM entries WHERE path = ?", (path,))
-        self._conn.commit()
+        self._commit_unless_batching()
 
     def all_entries(self) -> list[IndexEntry]:
         """すべてのインデックスエントリを返す."""

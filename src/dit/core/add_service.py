@@ -26,13 +26,13 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
     """Scope 内の追跡パスについてポインタを作成または更新する."""
     config = load_config(repo)
     scope = Scope(repo)
-    changed: list[Path] = []
-    with StatIndex(repo.index_db) as index:
-        # ポインタの確認・更新をリンク先の実体にそろえる。
+    changed = 0
+    with StatIndex(repo.index_db) as index, index.transaction():
         tracked = sorted(
             {p.resolve() for p in iter_tracked_files(repo, config) if scope.contains(repo.rel(p))}
         )
         tracked_rels = {repo.rel(p) for p in tracked}
+        written: set[Path] = set()
         for data_path in tracked:
             digest = resolve_content_hash(repo, index, data_path)
             pointer_path = Path(str(data_path) + ".dit")
@@ -43,38 +43,76 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
                     needs_write = False
             if needs_write:
                 pointer = write_pointer_for_file(repo, index, data_path, digest)
-                changed.append(repo.root / pointer.pointer_relpath)
+                written.add(repo.root / pointer.pointer_relpath)
+                changed += 1
                 if not quiet:
                     logger.info(f"add {pointer.path}")
         if prune:
-            changed.extend(_prune_orphaned_pointers(repo, scope, tracked_rels, quiet=quiet))
-    if changed:
-        _git_add(repo, changed)
-    return len(changed)
+            changed += _prune_orphaned_pointers(repo, scope, tracked_rels, quiet=quiet)
+        pending = _pending_pointers(repo, scope, tracked_rels, prune=prune)
+        paths = sorted(written | pending)
+        if paths:
+            _git_add(repo, paths)
+    return changed
 
 
 def _prune_orphaned_pointers(
-    repo: Repo,
-    scope: Scope,
-    tracked_rels: set[str],
-    *,
-    quiet: bool,
-) -> list[Path]:
-    removed: list[Path] = []
+    repo: Repo, scope: Scope, tracked_rels: set[str], *, quiet: bool
+) -> int:
+    removed = 0
     for pointer_path in iter_pointer_files(repo):
         try:
             pointer = read_pointer(pointer_path)
         except ValueError:
             continue
-        if not scope.contains(pointer.path):
-            continue
-        if pointer.path in tracked_rels:
+        if not scope.contains(pointer.path) or pointer.path in tracked_rels:
             continue
         pointer_path.unlink(missing_ok=True)
-        removed.append(pointer_path)
+        removed += 1
         if not quiet:
             logger.info(f"prune {pointer.path}")
     return removed
+
+
+def _pending_pointers(
+    repo: Repo, scope: Scope, tracked_rels: set[str], *, prune: bool
+) -> set[Path]:
+    """中断時に残った未ステージのポインタも収集する."""
+    git = shutil.which("git")
+    if git is None:
+        msg = "git executable not found"
+        raise RepoError(msg)
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                git,
+                "ls-files",
+                "--modified",
+                "--others",
+                "--deleted",
+                "--exclude-standard",
+                "-z",
+                "--",
+                "*.dit",
+            ],
+            cwd=repo.root,
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        msg = f"git ls-files failed: {exc}"
+        raise RepoError(msg) from exc
+    pending = set()
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = os.fsdecode(raw)
+        data_rel = rel[:-4]
+        if scope.contains(data_rel) and (
+            data_rel in tracked_rels or (prune and not (repo.root / rel).exists())
+        ):
+            pending.add(repo.root / rel)
+    return pending
 
 
 def _git_add(repo: Repo, paths: list[Path]) -> None:
