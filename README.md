@@ -9,7 +9,7 @@ MD 計算向けの大容量ファイル版管理ツール（DVC 非依存）。
 - 管理対象はリポジトリルートの `dit.toml` で宣言する（`.gitignore` と同じ書式）
 - `git commit` 時の pre-commit hook が `dit add` を自動実行し、ポインタ `*.dit` をステージする
 - ローカルキャッシュは持たない。ワークツリーの実体 + リモートが真実
-- 日常操作は `dit sync`（scope 内だけ一致確認と置く/pull。scope 外は触らない）
+- 日常操作は `dit sync`（scope 内を同期し、復元可能な scope 外の実体を削除）
 
 ## セットアップ
 
@@ -97,7 +97,7 @@ dit scope add data
 dit scope list
 ```
 
-scope 外のファイルは `dit add`、`dit push`、`dit pull`、`dit sync` の対象になりません。
+`dit add` と `dit push` は scope に関係なく実体を登録・アップロードします。`dit pull` は scope 内だけを取得します。`dit sync` は scope 内を同期し、scope 外の実体はポインタと一致しリモートに存在する場合に削除します。ポインタは残ります。
 
 ### 日常の操作
 
@@ -116,17 +116,17 @@ dit sync
 | コマンド | 役割 |
 |---------|------|
 | `dit init` | `dit.toml` / `.dit/` / pre-commit 設定を初期化 |
-| `dit add` | scope 内で `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
+| `dit add` | 全体で `dit.toml` に一致するファイルのポインタを更新（通常はフックから） |
 | `dit status` | 変更・未追跡・要 pull などを表示 |
-| `dit push` / `dit pull` | scope 内の低レベル転送。計画中はスピナーとポインタ確認数、転送中は K/M/Gbyte の N/N |
-| `dit sync` | 日常の同期（scope 内のみ）。計画中はスピナーとファイル確認数、転送中は K/M/Gbyte の N/N。`--dry-run` / `--prune-remote` |
+| `dit push` / `dit pull` | push は全体、pull は scope 内の低レベル転送。計画中はスピナーとポインタ確認数、転送中は K/M/Gbyte の N/N |
+| `dit sync` | scope 内の同期と復元可能な scope 外実体の削除。計画中はスピナーとファイル確認数、転送中は K/M/Gbyte の N/N。`--dry-run` / `--prune-remote` |
 | `dit scope add\|remove\|list` | このマシンで実体を持つディレクトリ |
 | `dit hook install\|uninstall\|status` | pre-commit 設定内の dit hook 管理 |
 
 ## sync の方針
 
 1. scope 内で `.dcd` と `.dit` が両方ある場合は一致確認。不一致なら mtime で新しい方を採用し、必要なら push / pull。`.dit` も合わせる
-2. scope 内ならローカルに実体を置く（欠落時は pull）。scope 外は無視する（削除もアップロードもしない）
+2. scope 内ならローカルに実体を置く（欠落時は pull）。scope 外はポインタと一致し remote に存在する実体だけを削除する
 
 孤児リモート削除は `dit sync --prune-remote` のときだけ。実行前に `git fetch --all --prune` を自動実行する。
 

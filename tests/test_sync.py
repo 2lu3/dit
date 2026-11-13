@@ -13,13 +13,13 @@ from moto import mock_aws
 
 from dit.core.add_service import _git_add as real_git_add, run_add
 from dit.core.config import DitConfig, RemoteConfig, init_config
-from dit.core.errors import RemoteError
+from dit.core.errors import RemoteError, RepoError
 from dit.core.hasher import hash_file
 from dit.core.pointer import Pointer, read_pointer, write_pointer
 from dit.core.remote.s3 import S3Remote
 from dit.core.repo import Repo
 from dit.core.scope import Scope
-from dit.core.sync_service import SyncAction, run_pull, run_push, run_sync
+from dit.core.sync_service import SyncAction, plan_sync, run_pull, run_push, run_sync
 from dit.main import cli
 
 if TYPE_CHECKING:
@@ -147,7 +147,7 @@ def test_sync_pushes_in_scope(tmp_path: Path) -> None:
 
 
 @mock_aws
-def test_sync_ignores_out_of_scope(tmp_path: Path) -> None:
+def test_sync_preserves_changed_out_of_scope(tmp_path: Path) -> None:
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
     repo = _init_repo(tmp_path)
     (repo.root / "keep").mkdir()
@@ -159,20 +159,22 @@ def test_sync_ignores_out_of_scope(tmp_path: Path) -> None:
     )
 
     results = run_sync(repo, dry_run=False, prune_remote=False)
-    assert results == []
+    assert results[0].action == SyncAction.WARNING
+    assert "differs from pointer" in results[0].message
     assert target.is_file()
-    assert run_push(repo, dry_run=False) == []
+    with pytest.raises(RepoError, match="differs from pointer"):
+        run_push(repo, dry_run=False)
 
 
-def test_add_only_updates_in_scope(tmp_path: Path) -> None:
+def test_add_updates_inside_and_outside_scope(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     in_scope = _write_tracked(repo, "keep", "a.dcd", b"in")
     out_scope = _write_tracked(repo, "other", "b.dcd", b"out")
     Scope(repo).add(repo.root / "keep")
 
-    assert run_add(repo, quiet=True) == 1
+    assert run_add(repo, quiet=True) == 2
     assert (in_scope.parent / "a.dcd.dit").is_file()
-    assert not (out_scope.parent / "b.dcd.dit").is_file()
+    assert (out_scope.parent / "b.dcd.dit").is_file()
 
 
 @pytest.mark.parametrize("prune", [False, True])
@@ -235,7 +237,7 @@ def test_add_symlinks_create_and_update_target_once(tmp_path: Path, monkeypatch,
 
 
 @mock_aws
-def test_push_skips_out_of_scope(tmp_path: Path) -> None:
+def test_push_includes_out_of_scope(tmp_path: Path) -> None:
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
     repo = _init_repo(tmp_path)
     target = _write_tracked(repo, "keep", "a.dcd", b"payload")
@@ -245,7 +247,7 @@ def test_push_skips_out_of_scope(tmp_path: Path) -> None:
     (repo.root / "other").mkdir()
     Scope(repo).add(repo.root / "other")
 
-    assert run_push(repo, dry_run=False) == []
+    assert [result.action for result in run_push(repo, dry_run=False)] == [SyncAction.PUSH]
     assert target.is_file()
     assert read_pointer(repo.root / "keep" / "a.dcd.dit").path == "keep/a.dcd"
 
@@ -419,3 +421,161 @@ def test_sync_waits_for_downloads_before_later_push(tmp_path: Path, monkeypatch)
 
     downloads.assert_called_once()
     uploads.assert_not_called()
+
+
+@mock_aws
+def test_sync_removes_only_recoverable_outside_scope_and_dry_run(tmp_path: Path) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    keep = _write_tracked(repo, "keep", "a.dcd", b"keep")
+    outside = _write_tracked(repo, "other", "b.dcd", b"outside")
+    run_add(repo, quiet=True)
+    run_push(repo)
+    scope = Scope(repo)
+    scope.add(keep.parent)
+    assert outside.exists()  # changing scope alone does not remove content
+    keep.unlink()
+
+    preview = run_sync(repo, dry_run=True)
+    assert [(r.path, r.action) for r in preview] == [
+        ("keep/a.dcd", SyncAction.PULL),
+        ("other/b.dcd", SyncAction.DELETE_LOCAL),
+    ]
+    assert not keep.exists()
+    assert outside.exists()
+    results = run_sync(repo)
+    assert [r.action for r in results] == [SyncAction.PULL, SyncAction.DELETE_LOCAL]
+    assert keep.read_bytes() == b"keep"
+    assert not outside.exists()
+    assert outside.with_name("b.dcd.dit").exists()
+    scope.remove(keep.parent)
+    assert [r.action for r in run_pull(repo)] == [SyncAction.PULL]
+    assert outside.read_bytes() == b"outside"
+
+
+@mock_aws
+@pytest.mark.parametrize("case", ["missing", "edited", "connection", "unregistered"])
+def test_sync_keeps_unsafe_outside_scope(tmp_path: Path, monkeypatch, case: str) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    (repo.root / "keep").mkdir()
+    target = _write_tracked(repo, "other", "a.dcd", b"original")
+    if case != "unregistered":
+        run_add(repo, quiet=True)
+    if case in {"edited", "connection"}:
+        run_push(repo)
+    if case == "edited":
+        target.write_bytes(b"changed")
+    Scope(repo).add(repo.root / "keep")
+    if case == "connection":
+        remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+        monkeypatch.setattr(remote, "exists", Mock(side_effect=RemoteError("connection failed")))
+        monkeypatch.setattr("dit.core.sync_service.require_remote", lambda config: remote)
+    for dry_run in (True, False):
+        results = run_sync(repo, dry_run=dry_run)
+        assert results[0].action == SyncAction.WARNING
+        assert {
+            "missing": "remote",
+            "edited": "differs",
+            "connection": "failed",
+            "unregistered": "pointer",
+        }[case] in results[0].message
+        assert target.exists()
+
+
+@mock_aws
+def test_sync_keeps_unreadable_outside_scope_and_pulls_inside(tmp_path: Path, monkeypatch) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    inside = _write_tracked(repo, "keep", "a.dcd", b"inside")
+    outside = _write_tracked(repo, "other", "b.dcd", b"outside")
+    run_add(repo, quiet=True)
+    run_push(repo)
+    inside.unlink()
+    Scope(repo).add(inside.parent)
+
+    def fail_outside(path):
+        if path == outside:
+            message = "permission denied"
+            raise PermissionError(message)
+        return hash_file(path)
+
+    monkeypatch.setattr("dit.core.sync_service.hash_file", fail_outside)
+    for dry_run in (True, False):
+        results = run_sync(repo, dry_run=dry_run)
+        assert [r.action for r in results] == [SyncAction.PULL, SyncAction.WARNING]
+        assert "cannot read local content" in results[1].message
+        assert outside.exists()
+    assert inside.read_bytes() == b"inside"
+
+
+@mock_aws
+@pytest.mark.parametrize("add_link_after_plan", [False, True])
+def test_sync_keeps_outside_target_of_in_scope_symlink(tmp_path: Path, add_link_after_plan) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    target = _write_tracked(repo, "other", "a.dcd", b"payload")
+    keep = repo.root / "keep"
+    keep.mkdir()
+    run_add(repo, quiet=True)
+    run_push(repo)
+    Scope(repo).add(keep)
+    link = keep / "alias.txt"  # links need not match the tracked patterns
+    if not add_link_after_plan:
+        link.symlink_to(target)
+    steps = plan_sync(repo)
+    if add_link_after_plan:
+        assert steps[0].result.action == SyncAction.DELETE_LOCAL
+        link.symlink_to(target)
+    else:
+        assert steps[0].result.action == SyncAction.WARNING
+        assert "in-scope symlink" in steps[0].result.message
+    results = run_sync(repo, steps=steps)
+    assert results[0].action == SyncAction.WARNING
+    assert "in-scope symlink" in results[0].message
+    assert link.read_bytes() == b"payload"
+
+
+@mock_aws
+@pytest.mark.parametrize("change", ["file", "remote", "scope"])
+def test_sync_rechecks_deletion_plan(tmp_path: Path, change: str) -> None:
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    target = _write_tracked(repo, "other", "a.dcd", b"original")
+    run_add(repo, quiet=True)
+    run_push(repo)
+    (repo.root / "keep").mkdir()
+    scope = Scope(repo)
+    scope.add(repo.root / "keep")
+    steps = plan_sync(repo)
+    if change == "file":
+        target.write_bytes(b"changed")
+    elif change == "remote":
+        pointer = read_pointer(target.with_name("a.dcd.dit"))
+        remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+        client.delete_object(Bucket="test-bucket", Key=remote.object_key(pointer.hash))
+    else:
+        scope.remove(repo.root / "keep")
+    result = run_sync(repo, steps=steps)
+    assert result[0].action == SyncAction.WARNING
+    assert target.exists()
+
+
+@mock_aws
+def test_prune_remote_keeps_working_tree_pointer(tmp_path: Path, monkeypatch) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    target = _write_tracked(repo, "other", "a.dcd", b"original")
+    run_add(repo, quiet=True)
+    run_push(repo)
+    (repo.root / "keep").mkdir()
+    Scope(repo).add(repo.root / "keep")
+    monkeypatch.setattr("dit.core.sync_service._git_fetch_all", lambda repo: None)
+    monkeypatch.setattr("dit.core.sync_service._hashes_from_all_refs", lambda repo: set())
+
+    results = run_sync(repo, prune_remote=True)
+
+    assert [r.action for r in results] == [SyncAction.DELETE_LOCAL]
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    assert remote.exists(read_pointer(target.with_name("a.dcd.dit")).hash)

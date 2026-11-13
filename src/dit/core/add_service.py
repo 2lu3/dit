@@ -23,14 +23,13 @@ if TYPE_CHECKING:
 
 
 def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
-    """Scope 内の追跡パスについてポインタを作成または更新する."""
+    """追跡パスについてポインタを作成または更新する."""
     config = load_config(repo)
     scope = Scope(repo)
     changed = 0
     with StatIndex(repo.index_db) as index, index.transaction():
-        tracked = sorted(
-            {p.resolve() for p in iter_tracked_files(repo, config) if scope.contains(repo.rel(p))}
-        )
+        # ポインタの確認・更新をリンク先の実体にそろえる。
+        tracked = sorted({p.resolve() for p in iter_tracked_files(repo, config)})
         tracked_rels = {repo.rel(p) for p in tracked}
         written: set[Path] = set()
         for data_path in tracked:
@@ -108,8 +107,8 @@ def _pending_pointers(
             continue
         rel = os.fsdecode(raw)
         data_rel = rel[:-4]
-        if scope.contains(data_rel) and (
-            data_rel in tracked_rels or (prune and not (repo.root / rel).exists())
+        if data_rel in tracked_rels or (
+            prune and scope.contains(data_rel) and not (repo.root / rel).exists()
         ):
             pending.add(repo.root / rel)
     return pending

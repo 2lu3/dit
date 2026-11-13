@@ -13,6 +13,7 @@ from dit.core.hasher import hash_file
 from dit.core.index import StatIndex
 from dit.core.pointer import read_pointer
 from dit.core.repo import Repo
+from dit.core.scope import Scope
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,6 +115,23 @@ def test_add_rolls_back_when_git_fails(tmp_path: Path) -> None:
         add_service.run_add(repo, quiet=True)
     with StatIndex(repo.index_db) as index:
         assert index.all_entries() == []
+    lock.unlink()
+    add_service.run_add(repo, quiet=True)
+    _assert_consistent(repo, [data])
+
+
+def test_add_recovers_unstaged_pointer_outside_scope(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo.root / "keep").mkdir()
+    outside = repo.root / "other"
+    outside.mkdir()
+    data = outside / "a.dcd"
+    data.write_bytes(b"payload")
+    Scope(repo).add(repo.root / "keep")
+    lock = repo.root / ".git" / "index.lock"
+    lock.touch()
+    with pytest.raises(RepoError, match="git add failed"):
+        add_service.run_add(repo, quiet=True)
     lock.unlink()
     add_service.run_add(repo, quiet=True)
     _assert_consistent(repo, [data])

@@ -8,7 +8,7 @@
 | [`dit hook`](hook.md) | pre-commit 設定内の dit hook を管理する. |
 | [`dit init`](init.md) | dit.toml / .dit/ / pre-commit 設定を初期化する. |
 | [`dit pull`](pull.md) | 欠落しているオブジェクトを scope 内からダウンロードする. |
-| [`dit push`](push.md) | Scope 内ポインタが指すローカルオブジェクトをアップロードする. |
-| [`dit scope`](scope.md) | 同期対象ディレクトリ（scope）を管理する. |
+| [`dit push`](push.md) | scope に関係なくポインタが指すローカルオブジェクトをアップロードする. |
+| [`dit scope`](scope.md) | ローカルに実体を保持するディレクトリ（scope）を管理する. |
 | [`dit status`](status.md) | ポインタと scope に対する追跡ファイルの状態を表示する. |
 | [`dit sync`](sync.md) | Scope 内だけリモートと同期する. |

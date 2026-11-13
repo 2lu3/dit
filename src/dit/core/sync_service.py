@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from dit.core.config import load_config
 from dit.core.content import resolve_content_hash, utc_now_iso, write_pointer_for_file
-from dit.core.errors import ConfigError, RepoError
+from dit.core.errors import ConfigError, PointerError, RemoteError, RepoError
+from dit.core.hasher import hash_file
 from dit.core.index import StatIndex
 from dit.core.pointer import Pointer, read_pointer
 from dit.core.remote.s3 import open_remote
@@ -20,7 +23,6 @@ from dit.core.tracker import iter_pointer_files, iter_tracked_files
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from dit.core.config import DitConfig
     from dit.core.remote.base import Remote
@@ -40,6 +42,7 @@ class SyncAction(StrEnum):
     PULL = "pull"
     UPDATE_POINTER = "update_pointer"
     DELETE_REMOTE = "delete_remote"
+    DELETE_LOCAL = "delete_local"
     WARNING = "warning"
     ERROR = "error"
 
@@ -139,7 +142,7 @@ def plan_push(repo: Repo, *, progress: PlanProgress | None = None) -> list[Trans
     """アップロード対象を収集する."""
     config = load_config(repo)
     remote = require_remote(config)
-    return collect_push_jobs(repo, remote, Scope(repo), progress=progress)
+    return collect_push_jobs(repo, remote, progress=progress)
 
 
 def plan_pull(repo: Repo, *, progress: PlanProgress | None = None) -> list[TransferJob]:
@@ -174,17 +177,16 @@ def collect_sync_jobs(steps: list[SyncStep]) -> list[TransferJob]:
 def collect_push_jobs(
     repo: Repo,
     remote: Remote,
-    scope: Scope,
     *,
     progress: PlanProgress | None = None,
 ) -> list[TransferJob]:
-    """Scope 内で未アップロードの実体を列挙する."""
+    """未アップロードの実体を列挙する."""
     pointer_files = iter_pointer_files(repo)
     if progress is not None:
         progress.set_total(len(pointer_files))
     jobs: list[TransferJob] = []
     for path in pointer_files:
-        job = _push_job(repo, scope, read_pointer(path))
+        job = _push_job(repo, read_pointer(path))
         if job is not None:
             jobs.append(job)
         elif progress is not None:
@@ -230,14 +232,14 @@ def collect_pull_jobs(
 
 def _push_job(
     repo: Repo,
-    scope: Scope,
     pointer: Pointer,
 ) -> TransferJob | None:
-    if not scope.contains(pointer.path):
-        return None
     data_path = repo.abs(pointer.path)
     if not data_path.is_file():
         return None
+    if hash_file(data_path) != pointer.hash:
+        msg = f"{pointer.path}: local content differs from pointer; run dit add first"
+        raise RepoError(msg)
     return TransferJob(
         path=pointer.path,
         data_path=data_path,
@@ -278,10 +280,10 @@ def run_push(
     progress: TransferProgress | None = None,
     jobs: list[TransferJob] | None = None,
 ) -> list[SyncResult]:
-    """Scope 内でリモートに無いローカル実体をアップロードする."""
+    """リモートに無いローカル実体をアップロードする."""
     config = load_config(repo)
     remote = require_remote(config)
-    pending = jobs if jobs is not None else collect_push_jobs(repo, remote, Scope(repo))
+    pending = jobs if jobs is not None else collect_push_jobs(repo, remote)
     if dry_run:
         return [SyncResult(job.path, SyncAction.PUSH, "upload") for job in pending]
     with StatIndex(repo.index_db) as index:
@@ -294,6 +296,9 @@ def _upload_job(
     job: TransferJob,
     progress: TransferProgress | None,
 ) -> SyncResult:
+    if hash_file(job.data_path) != job.content_hash:
+        msg = f"{job.path}: local content differs from pointer; run dit add first"
+        raise RepoError(msg)
     _notify_path(progress, job.path)
     remote.upload(job.data_path, job.content_hash, progress=_byte_callback(progress))
     index.mark_pushed(job.path, utc_now_iso())
@@ -422,7 +427,7 @@ def _transfer_step(
 
 def _plan_item(ctx: SyncCtx, item: SyncItem) -> list[SyncStep] | _RemoteCheck:
     if not ctx.scope.contains(item.rel):
-        return []
+        return _plan_outside_scope(ctx, item)
     has_data = item.data_path.is_file()
     if item.pointer is not None and has_data:
         return _plan_both(ctx, item)
@@ -431,6 +436,60 @@ def _plan_item(ctx: SyncCtx, item: SyncItem) -> list[SyncStep] | _RemoteCheck:
     if has_data:
         return [_status_step(item, SyncAction.WARNING, "missing pointer or untracked")]
     return []
+
+
+def _plan_outside_scope(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:  # noqa: PLR0911
+    if not item.data_path.is_file():
+        return []
+    if item.pointer is None:
+        return [_status_step(item, SyncAction.WARNING, "kept: missing pointer; run dit add")]
+    expected_path = ctx.repo.root / item.rel
+    if expected_path.resolve() != expected_path.absolute() or item.data_path != expected_path:
+        return [_status_step(item, SyncAction.WARNING, "kept: symbolic link")]
+    try:
+        if _has_in_scope_link(ctx, expected_path):
+            return [_status_step(item, SyncAction.WARNING, "kept: referenced by in-scope symlink")]
+    except (OSError, RuntimeError) as exc:
+        return [_status_step(item, SyncAction.WARNING, f"kept: symlink check failed: {exc}")]
+    try:
+        local_hash = hash_file(item.data_path)
+    except OSError as exc:
+        return [_status_step(item, SyncAction.WARNING, f"kept: cannot read local content: {exc}")]
+    if local_hash != item.pointer.hash:
+        return [_status_step(item, SyncAction.WARNING, "kept: local content differs from pointer")]
+    try:
+        present = ctx.remote.exists(item.pointer.hash)
+    except RemoteError as exc:
+        return [_status_step(item, SyncAction.WARNING, f"kept: remote check failed: {exc}")]
+    if not present:
+        return [_status_step(item, SyncAction.WARNING, "kept: content missing from remote")]
+    return [
+        _transfer_step(
+            item,
+            SyncAction.DELETE_LOCAL,
+            "remove local content",
+            item.pointer.hash,
+            item.pointer.size,
+        )
+    ]
+
+
+def _has_in_scope_link(ctx: SyncCtx, target: Path) -> bool:
+    def fail(exc: OSError) -> None:
+        raise exc
+
+    for directory, dirnames, filenames in os.walk(ctx.repo.root, onerror=fail):
+        dirnames[:] = [name for name in dirnames if name not in {".git", ".dit", ".venv"}]
+        for name in (*dirnames, *filenames):
+            path = Path(directory) / name
+            if not path.is_symlink() or not ctx.scope.contains(
+                path.relative_to(ctx.repo.root).as_posix()
+            ):
+                continue
+            resolved = path.resolve()
+            if resolved == target or resolved in target.parents:
+                return True
+    return False
 
 
 def _plan_both(ctx: SyncCtx, item: SyncItem) -> _RemoteCheck:
@@ -518,6 +577,30 @@ def _execute_step(
     if job is None:
         return
     action = step.result.action
+    if action == SyncAction.DELETE_LOCAL:
+        try:
+            pointer = read_pointer(ctx.repo.root / (job.path + ".dit"))
+        except (OSError, PointerError):
+            step.result.action = SyncAction.WARNING
+            step.result.message = "kept: pointer unavailable"
+            return
+        item = SyncItem(job.path, job.data_path, pointer)
+        checked = _plan_outside_scope(ctx, item)
+        if (
+            pointer.path != job.path
+            or ctx.scope.contains(job.path)
+            or not checked
+            or checked[0].result.action != SyncAction.DELETE_LOCAL
+        ):
+            step.result.action = SyncAction.WARNING
+            step.result.message = (
+                checked[0].result.message
+                if checked and checked[0].result.action != SyncAction.DELETE_LOCAL
+                else "kept: pointer, file or scope changed"
+            )
+            return
+        job.data_path.unlink()
+        return
     if action == SyncAction.UPDATE_POINTER:
         write_pointer_for_file(ctx.repo, ctx.index, job.data_path, job.content_hash)
         return
@@ -541,6 +624,7 @@ def _prune_remote_orphans(
 ) -> list[SyncResult]:
     _git_fetch_all(repo)
     referenced = _hashes_from_all_refs(repo)
+    referenced.update(pointer.hash for pointer in _load_pointers(repo).values())
     results: list[SyncResult] = []
     for content_hash in remote.list_hashes():
         if content_hash in referenced:

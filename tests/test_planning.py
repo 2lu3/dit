@@ -80,7 +80,7 @@ def test_sync_plan_preserves_decisions_with_parallel_checks(
     new_pointer = _pointer(repo, "keep/f.dcd", local_payload=b"old", pointer_payload=b"new remote")
     (tmp_path / "keep/g.dcd").write_bytes(b"no pointer")
     _pointer(repo, "keep/h.dcd", local_payload=None, pointer_payload=b"same")
-    _pointer(repo, "outside/i.dcd", local_payload=b"out", pointer_payload=b"out")
+    outside = _pointer(repo, "outside/i.dcd", local_payload=b"out", pointer_payload=b"out")
     Scope(repo).add(tmp_path / "keep")
     present = [matched, to_pull]
     if local_newer_remote_exists:
@@ -110,9 +110,9 @@ def test_sync_plan_preserves_decisions_with_parallel_checks(
     )
     assert [(step.result.path, step.result.action) for step in steps] == [
         (f"keep/{name}.dcd", action) for name, action in expected
-    ]
-    assert set(checked) == {matched, to_push, to_pull, missing, new_local, new_pointer}
-    assert len(checked) == 6
+    ] + [("outside/i.dcd", "warning")]
+    assert set(checked) == {matched, to_push, to_pull, missing, new_local, new_pointer, outside}
+    assert len(checked) == 7
     assert (progress.total, progress.completed) == (9, 9)
     assert {p: p.read_bytes() for p in tmp_path.rglob("*.dcd*")} == before
 
