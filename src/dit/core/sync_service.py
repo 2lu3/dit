@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from dit.core.config import load_config
@@ -21,7 +23,6 @@ from dit.core.tracker import iter_pointer_files, iter_tracked_files
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from dit.core.config import DitConfig
     from dit.core.remote.base import Remote
@@ -446,6 +447,11 @@ def _plan_outside_scope(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:  # noqa
     if expected_path.resolve() != expected_path.absolute() or item.data_path != expected_path:
         return [_status_step(item, SyncAction.WARNING, "kept: symbolic link")]
     try:
+        if _has_in_scope_link(ctx, expected_path):
+            return [_status_step(item, SyncAction.WARNING, "kept: referenced by in-scope symlink")]
+    except (OSError, RuntimeError) as exc:
+        return [_status_step(item, SyncAction.WARNING, f"kept: symlink check failed: {exc}")]
+    try:
         local_hash = hash_file(item.data_path)
     except OSError as exc:
         return [_status_step(item, SyncAction.WARNING, f"kept: cannot read local content: {exc}")]
@@ -466,6 +472,24 @@ def _plan_outside_scope(ctx: SyncCtx, item: SyncItem) -> list[SyncStep]:  # noqa
             item.pointer.size,
         )
     ]
+
+
+def _has_in_scope_link(ctx: SyncCtx, target: Path) -> bool:
+    def fail(exc: OSError) -> None:
+        raise exc
+
+    for directory, dirnames, filenames in os.walk(ctx.repo.root, onerror=fail):
+        dirnames[:] = [name for name in dirnames if name not in {".git", ".dit", ".venv"}]
+        for name in (*dirnames, *filenames):
+            path = Path(directory) / name
+            if not path.is_symlink() or not ctx.scope.contains(
+                path.relative_to(ctx.repo.root).as_posix()
+            ):
+                continue
+            resolved = path.resolve()
+            if resolved == target or resolved in target.parents:
+                return True
+    return False
 
 
 def _plan_both(ctx: SyncCtx, item: SyncItem) -> _RemoteCheck:

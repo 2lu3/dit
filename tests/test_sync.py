@@ -510,6 +510,33 @@ def test_sync_keeps_unreadable_outside_scope_and_pulls_inside(tmp_path: Path, mo
 
 
 @mock_aws
+@pytest.mark.parametrize("add_link_after_plan", [False, True])
+def test_sync_keeps_outside_target_of_in_scope_symlink(tmp_path: Path, add_link_after_plan) -> None:
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+    repo = _init_repo(tmp_path)
+    target = _write_tracked(repo, "other", "a.dcd", b"payload")
+    keep = repo.root / "keep"
+    keep.mkdir()
+    run_add(repo, quiet=True)
+    run_push(repo)
+    Scope(repo).add(keep)
+    link = keep / "alias.txt"  # links need not match the tracked patterns
+    if not add_link_after_plan:
+        link.symlink_to(target)
+    steps = plan_sync(repo)
+    if add_link_after_plan:
+        assert steps[0].result.action == SyncAction.DELETE_LOCAL
+        link.symlink_to(target)
+    else:
+        assert steps[0].result.action == SyncAction.WARNING
+        assert "in-scope symlink" in steps[0].result.message
+    results = run_sync(repo, steps=steps)
+    assert results[0].action == SyncAction.WARNING
+    assert "in-scope symlink" in results[0].message
+    assert link.read_bytes() == b"payload"
+
+
+@mock_aws
 @pytest.mark.parametrize("change", ["file", "remote", "scope"])
 def test_sync_rechecks_deletion_plan(tmp_path: Path, change: str) -> None:
     client = boto3.client("s3", region_name="us-east-1")
