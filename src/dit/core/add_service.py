@@ -26,7 +26,7 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
     config = load_config(repo)
     scope = Scope(repo)
     changed = 0
-    with StatIndex(repo.index_db) as index:
+    with StatIndex(repo.index_db) as index, index.transaction():
         # ポインタの確認・更新をリンク先の実体にそろえる。
         tracked = sorted(
             {p.resolve() for p in iter_tracked_files(repo, config) if scope.contains(repo.rel(p))}
@@ -42,10 +42,11 @@ def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
                     needs_write = False
             if needs_write:
                 pointer = write_pointer_for_file(repo, index, data_path, digest)
-                _git_add(repo, repo.root / pointer.pointer_relpath)
                 changed += 1
                 if not quiet:
                     logger.info(f"add {pointer.path}")
+            # 中断時にポインタの書き込みだけが済んだ場合も再実行でステージする。
+            _git_add(repo, pointer_path)
         if prune:
             changed += _prune_orphaned_pointers(repo, scope, tracked_rels, quiet=quiet)
     return changed
@@ -59,6 +60,7 @@ def _prune_orphaned_pointers(
     quiet: bool,
 ) -> int:
     removed = 0
+    _stage_deleted_pointers(repo, scope, tracked_rels)
     for pointer_path in iter_pointer_files(repo):
         try:
             pointer = read_pointer(pointer_path)
@@ -76,21 +78,53 @@ def _prune_orphaned_pointers(
     return removed
 
 
+def _stage_deleted_pointers(repo: Repo, scope: Scope, tracked_rels: set[str]) -> None:
+    # 削除後、Git へのステージ前に中断したポインタも再実行で処理する。
+    git = shutil.which("git")
+    if git is not None:
+        result = subprocess.run(  # noqa: S603
+            [git, "ls-files", "--deleted", "-z", "--", "*.dit"],
+            cwd=repo.root,
+            check=False,
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            for raw_path in result.stdout.split(b"\0"):
+                if not raw_path:
+                    continue
+                path = Path(raw_path.decode("utf-8", errors="surrogateescape"))
+                data_rel = str(path)[:-4]
+                if scope.contains(data_rel) and data_rel not in tracked_rels:
+                    _git_add(repo, repo.root / path)
+
+
 def _git_add(repo: Repo, path: Path) -> None:
     git = shutil.which("git")
     if git is None:
         msg = "git executable not found"
         raise RepoError(msg)
     try:
+        if not path.exists():
+            tracked = subprocess.run(  # noqa: S603
+                [git, "ls-files", "--error-unmatch", "--", str(path)],
+                cwd=repo.root,
+                check=False,
+                capture_output=True,
+                timeout=60,
+            )
+            if tracked.returncode == 1:
+                return
+            tracked.check_returncode()
         # git path from shutil.which; args are fixed literals plus a Path
         subprocess.run(  # noqa: S603
             [git, "add", "--", str(path)],
             cwd=repo.root,
-            check=False,
+            check=True,
             capture_output=True,
             text=True,
             timeout=60,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
         msg = f"git add failed for {path}: {exc}"
         raise RepoError(msg) from exc
