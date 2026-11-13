@@ -74,7 +74,7 @@ def _run_byte_transfer(
 @click.command("push")
 @click.option("--dry-run", is_flag=True, help="実行せずに予定だけ表示する")
 def push_cmd(*, dry_run: bool) -> None:
-    """Scope 内ポインタが指すローカルオブジェクトをアップロードする.
+    """ポインタが指すローカルオブジェクトを scope に関係なくアップロードする.
 
     転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示する.
     """
@@ -128,7 +128,7 @@ def _run_sync(*, dry_run: bool, prune_remote: bool) -> list[SyncResult]:
     help="git fetch --all --prune のあと、参照されないリモートオブジェクトを削除する",
 )
 def sync_cmd(*, dry_run: bool, prune_remote: bool) -> None:
-    """Scope 内だけリモートと同期する.
+    """Scope 内を同期し、安全に復元できる scope 外の実体を削除する.
 
     転送中はバイト量を Kbyte / Mbyte / Gbyte の N/N で表示する.
     """

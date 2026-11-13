@@ -15,7 +15,7 @@ $ dit sync
 
 ## ファイルを変更したあと
 
-`.pre-commit-config.yaml` の dit hook は、Git の commit 時に `dit add` を実行して scope 内のポインタを更新します。初回だけ `pre-commit install` を実行してください。
+`.pre-commit-config.yaml` の dit hook は、Git の commit 時に `dit add` を実行して scope に関係なくポインタを更新します。初回だけ `pre-commit install` を実行してください。
 
 ```console
 $ git add dit.toml path/to/file.dit

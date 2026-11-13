@@ -25,7 +25,7 @@ def _cli_callback() -> None:
     ポインタ・実体・scope と sync の動き:
 
     \b
-      scope 外は無視（触らない）
+      scope 外の実体は復元可能なら sync で削除
 
     \b
       ポインタ+実体   一致確認。必要なら push / pull

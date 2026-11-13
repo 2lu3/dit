@@ -9,7 +9,7 @@
   ↓  実体がなく、scope 内（要 pull）
   .  実体がなく、scope 外
   M  実体のハッシュがポインタと不一致（変更あり、scope 内）
-  S  実体はあるが scope 外（触らない）
+  S  実体はあるが scope 外
      問題なし（ポインタと一致し、scope 内）
 
 ```console

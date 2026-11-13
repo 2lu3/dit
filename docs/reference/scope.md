@@ -1,6 +1,6 @@
 # `dit scope`
 
-同期対象ディレクトリ（scope）を管理する.
+ローカルに実体を保持するディレクトリ（scope）を管理する。設定変更だけでは実体を削除しない。
 
 ```console
 $ dit scope [OPTIONS] COMMAND [ARGS]...

@@ -22,15 +22,13 @@ if TYPE_CHECKING:
 
 
 def run_add(repo: Repo, *, quiet: bool = False, prune: bool = False) -> int:
-    """Scope 内の追跡パスについてポインタを作成または更新する."""
+    """追跡パスについてポインタを作成または更新する."""
     config = load_config(repo)
     scope = Scope(repo)
     changed = 0
     with StatIndex(repo.index_db) as index:
         # ポインタの確認・更新をリンク先の実体にそろえる。
-        tracked = sorted(
-            {p.resolve() for p in iter_tracked_files(repo, config) if scope.contains(repo.rel(p))}
-        )
+        tracked = sorted({p.resolve() for p in iter_tracked_files(repo, config)})
         tracked_rels = {repo.rel(p) for p in tracked}
         for data_path in tracked:
             digest = resolve_content_hash(repo, index, data_path)
