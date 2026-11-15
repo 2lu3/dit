@@ -470,7 +470,7 @@ wheels = [
 
 [[package]]
 name = "dit"
-version = "0.2.30"
+version = "0.2.31"
 source = { editable = "." }
 default-groups = ["dev", "docs"]
 dependencies = [
