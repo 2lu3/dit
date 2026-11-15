@@ -246,21 +246,23 @@ def test_download_staging_does_not_overwrite_another_destination(tmp_path: Path)
 
 
 @mock_aws
-@pytest.mark.parametrize("concurrency", [None, 1, 2])
-def test_parallel_exists_checks_deduplicate_and_report_present_and_missing(
-    monkeypatch, concurrency
-):
-    if concurrency is not None:
-        monkeypatch.setenv("DIT_TRANSFER_CONCURRENCY", str(concurrency))
+def test_bulk_exists_checks_deduplicate_and_refresh_present_and_missing():
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket="test-bucket")
     remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
     hashes = [f"blake3:{i:064x}" for i in range(4)]
     for content_hash in hashes[:2]:
         client.put_object(Bucket="test-bucket", Key=remote.object_key(content_hash), Body=b"data")
-    capture = _RequestsInFlight(concurrency or len(hashes))
-    remote._client.meta.events.register("before-call.s3.HeadObject", capture.before)
-    remote._client.meta.events.register("after-call.s3.HeadObject", capture.after)
+    requests = []
+
+    def before_list(**kwargs):
+        requests.append(kwargs["params"]["query_string"])
+
+    def unexpected_head(**kwargs):
+        pytest.fail("bulk checks must not issue HEAD requests")
+
+    remote._client.meta.events.register("before-call.s3.ListObjectsV2", before_list)
+    remote._client.meta.events.register("before-call.s3.HeadObject", unexpected_head)
     checked = []
     main_thread = threading.get_ident()
 
@@ -271,41 +273,177 @@ def test_parallel_exists_checks_deduplicate_and_report_present_and_missing(
     results = remote.exists_many([*hashes, *hashes], on_checked=report)
 
     assert results == dict(zip(hashes, [True, True, False, False], strict=True))
-    assert capture.count == len(hashes)
-    assert capture.peak == (concurrency or len(hashes))
+    assert len(requests) == 1
+    assert requests[0]["prefix"] == "md/files/blake3/"
     assert sorted(checked) == hashes
 
     client.delete_object(Bucket="test-bucket", Key=remote.object_key(hashes[0]))
     assert remote.exists_many([hashes[0]]) == {hashes[0]: False}
-    assert capture.count == len(hashes) + 1
+    assert len(requests) == 2
 
 
 @pytest.mark.parametrize("error", ["permission", "connection"])
-def test_parallel_exists_checks_propagate_errors_and_stop_queuing(monkeypatch, error):
-    monkeypatch.setenv("DIT_TRANSFER_CONCURRENCY", "2")
+def test_bulk_exists_checks_propagate_errors(monkeypatch, error):
     remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
-    barrier = threading.Barrier(2)
     calls = []
 
-    def fail_head(**kwargs):
-        calls.append(kwargs["Key"])
-        barrier.wait(timeout=5)
+    def fail_list(**kwargs):
+        calls.append(kwargs["Prefix"])
         if error == "connection":
             raise EndpointConnectionError(endpoint_url="https://storage.invalid")
-        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "HeadObject")
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListObjectsV2")
 
-    monkeypatch.setattr(remote._client, "head_object", fail_head)
-    with pytest.raises(RemoteError, match="failed to head"):
-        remote.exists_many([f"blake3:{i:064x}" for i in range(10)])
+    monkeypatch.setattr(remote._client, "list_objects_v2", fail_list)
+    checked = []
+    with pytest.raises(RemoteError, match="failed to list"):
+        remote.exists_many([f"blake3:{i:064x}" for i in range(10)], on_checked=checked.append)
 
-    assert len(calls) == 2
+    assert len(calls) == 1
+    assert checked == []
 
 
 def test_empty_exists_check_does_not_request_remote(monkeypatch):
     remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
 
-    def unexpected_head(**kwargs):
+    def unexpected_request(**kwargs):
         pytest.fail("empty input must not query S3")
 
-    monkeypatch.setattr(remote._client, "head_object", unexpected_head)
+    monkeypatch.setattr(remote._client, "head_object", unexpected_request)
+    monkeypatch.setattr(remote._client, "list_objects_v2", unexpected_request)
     assert remote.exists_many([]) == {}
+
+
+@mock_aws
+def test_bulk_exists_checks_all_pages_within_prefix(monkeypatch):
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="test-bucket")
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    hashes = [f"blake3:{i:064x}" for i in range(5)]
+    for content_hash in hashes[:4]:
+        client.put_object(Bucket="test-bucket", Key=remote.object_key(content_hash), Body=b"x")
+    client.put_object(
+        Bucket="test-bucket", Key="other/" + remote.object_key(hashes[4]), Body=b"other project"
+    )
+    # ハッシュ文字列が同じでも、キーの分割位置が違えば実体の保存先ではない。
+    digest = hashes[4].removeprefix("blake3:")
+    client.put_object(
+        Bucket="test-bucket", Key=f"md/files/blake3/{digest[:1]}/{digest[1:]}", Body=b"wrong key"
+    )
+    original_list = remote._client.list_objects_v2
+    calls = []
+
+    def small_pages(**kwargs):
+        calls.append(kwargs.copy())
+        return original_list(**(kwargs | {"MaxKeys": 2}))
+
+    monkeypatch.setattr(remote._client, "list_objects_v2", small_pages)
+
+    assert remote.exists_many(hashes) == dict.fromkeys(hashes[:4], True) | {hashes[4]: False}
+    assert len(calls) == 3
+    assert "ContinuationToken" not in calls[0]
+    assert calls[1]["ContinuationToken"]
+    assert all(call["Prefix"] == "md/files/blake3/" for call in calls)
+
+
+@pytest.mark.parametrize("failure", ["missing_token", "repeated_token", "second_page"])
+def test_bulk_exists_checks_do_not_accept_incomplete_listing(monkeypatch, failure):
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    calls = []
+    checked = []
+
+    def incomplete_page(**kwargs):
+        calls.append(kwargs)
+        if failure == "second_page" and len(calls) == 2:
+            raise EndpointConnectionError(endpoint_url="https://storage.invalid")
+        page = {"IsTruncated": True, "Contents": [{"Key": remote.object_key("blake3:abc")}]}
+        if failure != "missing_token":
+            page["NextContinuationToken"] = "same-token"
+        return page
+
+    monkeypatch.setattr(remote._client, "list_objects_v2", incomplete_page)
+
+    with pytest.raises(RemoteError):
+        remote.exists_many(["blake3:abc", "blake3:def"], on_checked=checked.append)
+
+    assert checked == []
+    assert len(calls) <= 2
+
+
+@mock_aws
+@pytest.mark.parametrize(
+    ("concurrency", "size"), [(None, MIB), (1, MIB), (2, MIB), (3, 9 * MIB), (2, None)]
+)
+def test_parallel_uploads_share_request_limit(tmp_path: Path, monkeypatch, concurrency, size):
+    if concurrency is not None:
+        monkeypatch.setenv("DIT_TRANSFER_CONCURRENCY", str(concurrency))
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="test-bucket")
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    uploads = []
+    for i in range(4):
+        path = tmp_path / f"{i}.dcd"
+        file_size = size if size is not None else [0, 1, 9 * MIB, MIB][i]
+        path.write_bytes(bytes([i]) * file_size)
+        uploads.append((hash_file(path), path))
+    capture = _RequestsInFlight(concurrency or len(uploads))
+    for operation in ("PutObject", "UploadPart"):
+        remote._client.meta.events.register(f"before-call.s3.{operation}", capture.before)
+        remote._client.meta.events.register(f"after-call.s3.{operation}", capture.after)
+
+    def unexpected_head(**kwargs):
+        pytest.fail("planned uploads must not repeat HEAD checks")
+
+    remote._client.meta.events.register("before-call.s3.HeadObject", unexpected_head)
+    main_thread = threading.get_ident()
+    started = []
+    completed = []
+    amounts = []
+
+    def iter_uploads():
+        for item in uploads:
+            assert threading.get_ident() == main_thread
+            yield item
+
+    def uploaded(path):
+        assert threading.get_ident() == main_thread
+        completed.append(path)
+
+    remote.upload_many(
+        iter_uploads(), progress=amounts.append, on_start=started.append, on_uploaded=uploaded
+    )
+
+    for content_hash, path in uploads:
+        body = client.get_object(Bucket="test-bucket", Key=remote.object_key(content_hash))["Body"]
+        assert body.read() == path.read_bytes()
+    assert set(started) == set(completed) == {path for _, path in uploads}
+    assert sum(amounts) == sum(path.stat().st_size for _, path in uploads)
+    assert capture.peak == (concurrency or len(uploads))
+    assert capture.active == 0
+
+
+@mock_aws
+def test_parallel_uploads_stop_after_error(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DIT_TRANSFER_CONCURRENCY", "2")
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="test-bucket")
+    remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
+    uploads = []
+    for i in range(6):
+        path = tmp_path / f"{i}.dcd"
+        path.write_bytes(bytes([i]))
+        uploads.append((hash_file(path), path))
+    barrier = threading.Barrier(2)
+
+    def fail_put(**kwargs):
+        barrier.wait(timeout=5)
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "PutObject")
+
+    remote._client.meta.events.register("before-call.s3.PutObject", fail_put)
+    started = []
+    completed = []
+    with pytest.raises(RemoteError, match="failed to upload"):
+        remote.upload_many(uploads, on_start=started.append, on_uploaded=completed.append)
+
+    assert len(started) == 2
+    assert completed == []
+    assert remote.list_hashes() == []

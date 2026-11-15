@@ -49,12 +49,12 @@ def test_stat_index_skips_rehash(tmp_path: Path) -> None:
     db = tmp_path / "index.db"
     path = tmp_path / "f.dcd"
     path.write_bytes(b"data")
-    size, mtime_ns, inode = file_stat_tuple(path)
+    size, mtime_ns, inode, ctime_ns = file_stat_tuple(path)
     with StatIndex(db) as index:
-        index.upsert(IndexEntry("f.dcd", size, mtime_ns, inode, "blake3:dead", None))
+        index.upsert(IndexEntry("f.dcd", size, mtime_ns, inode, "blake3:dead", ctime_ns=ctime_ns))
         entry = index.get("f.dcd")
         assert entry is not None
-        assert stats_match(entry, size, mtime_ns, inode)
+        assert stats_match(entry, size, mtime_ns, inode, ctime_ns)
 
 
 def test_track_patterns_extension_and_dir() -> None:

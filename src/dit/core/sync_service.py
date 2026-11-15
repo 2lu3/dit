@@ -22,7 +22,7 @@ from dit.core.scope import Scope
 from dit.core.tracker import iter_pointer_files, iter_tracked_files
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from dit.core.config import DitConfig
     from dit.core.remote.base import Remote
@@ -185,14 +185,20 @@ def collect_push_jobs(
     if progress is not None:
         progress.set_total(len(pointer_files))
     jobs: list[TransferJob] = []
-    for path in pointer_files:
-        job = _push_job(repo, read_pointer(path))
-        if job is not None:
-            jobs.append(job)
-        elif progress is not None:
-            progress.advance()
+    with StatIndex(repo.index_db) as index, index.transaction():
+        for path in pointer_files:
+            job = _push_job(repo, index, read_pointer(path))
+            if job is not None:
+                jobs.append(job)
+            elif progress is not None:
+                progress.advance()
     presence = _check_remote_hashes(remote, [job.content_hash for job in jobs], progress)
-    return [job for job in jobs if not presence[job.content_hash]]
+    # 全パスを検証したうえで、同じ内容の実体は一度だけ送信する。
+    unique: dict[str, TransferJob] = {}
+    for job in jobs:
+        if not presence[job.content_hash]:
+            unique.setdefault(job.content_hash, job)
+    return list(unique.values())
 
 
 def _check_remote_hashes(
@@ -232,12 +238,13 @@ def collect_pull_jobs(
 
 def _push_job(
     repo: Repo,
+    index: StatIndex,
     pointer: Pointer,
 ) -> TransferJob | None:
     data_path = repo.abs(pointer.path)
     if not data_path.is_file():
         return None
-    if hash_file(data_path) != pointer.hash:
+    if resolve_content_hash(repo, index, data_path) != pointer.hash:
         msg = f"{pointer.path}: local content differs from pointer; run dit add first"
         raise RepoError(msg)
     return TransferJob(
@@ -286,8 +293,39 @@ def run_push(
     pending = jobs if jobs is not None else collect_push_jobs(repo, remote)
     if dry_run:
         return [SyncResult(job.path, SyncAction.PUSH, "upload") for job in pending]
+    _upload_jobs(repo, remote, pending, progress)
+    return [SyncResult(job.path, SyncAction.PUSH, "upload") for job in pending]
+
+
+def _upload_jobs(
+    repo: Repo,
+    remote: Remote,
+    jobs: list[TransferJob],
+    progress: TransferProgress | None,
+) -> None:
+    if not jobs:
+        return
+
+    def validated_uploads() -> Iterator[tuple[str, Path]]:
+        for job in jobs:
+            if resolve_content_hash(repo, index, job.data_path) != job.content_hash:
+                msg = f"{job.path}: local content differs from pointer; run dit add first"
+                raise RepoError(msg)
+            yield job.content_hash, job.data_path
+
+    completed: list[Path] = []
     with StatIndex(repo.index_db) as index:
-        return [_upload_job(remote, index, job, progress) for job in pending]
+        remote.upload_many(
+            validated_uploads(),
+            progress=_byte_callback(progress),
+            on_start=lambda path: _notify_path(progress, repo.rel(path)),
+            on_uploaded=completed.append,
+        )
+        # 通信中に SQLite の書き込みロックを保持せず、完了後にまとめて記録する。
+        with index.transaction():
+            pushed_at = utc_now_iso()
+            for path in completed:
+                index.mark_pushed(repo.rel(path), pushed_at)
 
 
 def _upload_job(

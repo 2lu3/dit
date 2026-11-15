@@ -59,9 +59,11 @@ DIT_ENDPOINT_URL=https://minio.example.com
 
 サブディレクトリから実行しても、リポジトリ直下の `.env` を読み込む。worktree では各 worktree 直下が対象。既存の環境変数を優先し、`.env` がなくても環境変数だけで利用できる。秘密情報を含む `.env` は `.gitignore` に追加し、コミットしない。
 
-`push` / `pull` / `sync` は、8 MiB 以上のファイルを分割し、最大16並列で転送する。`pull` と `sync` では複数ファイルも同時に取得し、ダウンロード全体でこの上限を共有する。並列数は環境変数 `DIT_TRANSFER_CONCURRENCY` または `.env` で正の整数に変更できる。回線に合わせた調整方法は[トラブルシューティング](docs/guide/troubleshooting.md#pushpull-が遅い)を参照。
+`push` / `pull` / `sync` は、8 MiB 以上のファイルを分割し、最大16並列で転送する。`push` は複数ファイルを同時に送信し、`pull` と `sync` は複数ファイルを同時に取得する。ファイル内の分割転送も含め、各転送バッチ全体でこの上限を共有する。並列数は環境変数 `DIT_TRANSFER_CONCURRENCY` または `.env` で正の整数に変更できる。回線に合わせた調整方法は[トラブルシューティング](docs/guide/troubleshooting.md#pushpull-が遅い)を参照。
 
-`push` と `sync` の準備段階でも、リモートでの存在確認を同じ並列数で行う。同じハッシュへの確認は1回にまとめる。
+`push` は `.dit/index.db` の更新日時・変更時刻（ctime）・サイズ・inode が一致する場合、保存済みハッシュを使う。既存 DB は自動移行し、ctime が未記録のファイルは初回に再計算する。全パスを確認したうえで、同じ内容のファイルは一度だけ送信する。
+
+`push` と `sync` の scope 内の存在確認は、対象 prefix のオブジェクト一覧を取得して一括照合する。保存先には一覧取得の権限（S3 では `s3:ListBucket`）が必要。一覧は毎回取得し、途中で失敗した場合は転送を開始しない。`sync` の scope 外の実体は、削除前に引き続き個別に確認する。
 
 新規リポジトリでは `dit init` に `--bucket` と `--prefix` を指定する。clone 済みで `dit.toml` がある場合は、引数なしの `dit init` で設定を読み込んで `.dit/` と `.pre-commit-config.yaml` を更新する。
 

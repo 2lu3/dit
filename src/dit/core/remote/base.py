@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
 
@@ -35,6 +35,17 @@ class Remote(ABC):
         progress: Callable[[int], None] | None = None,
     ) -> None:
         """指定コンテンツハッシュでローカルファイルをアップロードする."""
+
+    @abstractmethod
+    def upload_many(
+        self,
+        uploads: Iterable[tuple[str, Path]],
+        *,
+        progress: Callable[[int], None] | None = None,
+        on_start: Callable[[Path], None] | None = None,
+        on_uploaded: Callable[[Path], None] | None = None,
+    ) -> None:
+        """未保存と確認済みの実体を送信する。列挙と開始・完了通知は呼出元で行う."""
 
     @abstractmethod
     def download(
