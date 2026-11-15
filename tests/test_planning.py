@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -58,7 +57,7 @@ def _pointer(repo, name, *, local_payload, pointer_payload, local_newer=False):
 @mock_aws
 @pytest.mark.parametrize("local_newer_remote_exists", [False, True])
 @pytest.mark.parametrize("pointer_newer_remote_exists", [False, True])
-def test_sync_plan_preserves_decisions_with_parallel_checks(
+def test_sync_plan_preserves_decisions_with_bulk_checks(
     tmp_path: Path, monkeypatch, local_newer_remote_exists, pointer_newer_remote_exists
 ):
     client = boto3.client("s3", region_name="us-east-1")
@@ -89,14 +88,14 @@ def test_sync_plan_preserves_decisions_with_parallel_checks(
         present.append(new_pointer)
     for digest in present:
         client.put_object(Bucket="test-bucket", Key=remote.object_key(digest), Body=b"object")
-    original_exists = remote.exists
+    original_exists_many = remote.exists_many
     checked = []
 
-    def exists(digest):
-        checked.append(digest)
-        return original_exists(digest)
+    def exists_many(digests, **kwargs):
+        checked.extend(set(digests))
+        return original_exists_many(digests, **kwargs)
 
-    monkeypatch.setattr(remote, "exists", exists)
+    monkeypatch.setattr(remote, "exists_many", exists_many)
     before = {p: p.read_bytes() for p in tmp_path.rglob("*.dcd*")}
     progress = _Progress()
 
@@ -111,17 +110,16 @@ def test_sync_plan_preserves_decisions_with_parallel_checks(
     assert [(step.result.path, step.result.action) for step in steps] == [
         (f"keep/{name}.dcd", action) for name, action in expected
     ] + [("outside/i.dcd", "warning")]
-    assert set(checked) == {matched, to_push, to_pull, missing, new_local, new_pointer, outside}
-    assert len(checked) == 7
+    assert set(checked) == {matched, to_push, to_pull, missing, new_local, new_pointer}
+    assert len(checked) == 6
+    assert outside not in checked  # 削除候補は引き続き個別に確認する。
     assert (progress.total, progress.completed) == (9, 9)
     assert {p: p.read_bytes() for p in tmp_path.rglob("*.dcd*")} == before
 
 
 @mock_aws
 @pytest.mark.parametrize("plan", [plan_push, plan_sync])
-def test_plan_checks_distinct_hashes_concurrently_and_counts_duplicate_paths(
-    tmp_path: Path, monkeypatch, plan
-):
+def test_plan_lists_remote_once_and_counts_duplicate_paths(tmp_path: Path, monkeypatch, plan):
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket="test-bucket")
     (tmp_path / ".git").mkdir()
@@ -132,18 +130,20 @@ def test_plan_checks_distinct_hashes_concurrently_and_counts_duplicate_paths(
         _pointer(repo, f"{name}.dcd", local_payload=payload, pointer_payload=payload)
     remote = S3Remote(RemoteConfig(bucket="test-bucket", prefix="md"))
     monkeypatch.setattr("dit.core.sync_service.require_remote", lambda config: remote)
-    barrier = threading.Barrier(2)
     checked = []
 
-    def before_head(**kwargs):
-        checked.append(kwargs["params"]["url_path"])
-        barrier.wait(timeout=5)
+    def before_list(**kwargs):
+        checked.append(kwargs["params"]["query_string"])
 
-    remote._client.meta.events.register("before-call.s3.HeadObject", before_head)
+    def unexpected_head(**kwargs):
+        pytest.fail("bulk planning must not send per-object HEAD requests")
+
+    remote._client.meta.events.register("before-call.s3.ListObjectsV2", before_list)
+    remote._client.meta.events.register("before-call.s3.HeadObject", unexpected_head)
     progress = _Progress()
 
     planned = plan(repo, progress=progress)
 
-    assert len(planned) == 3
-    assert len(checked) == 2
+    assert len(planned) == (2 if plan is plan_push else 3)
+    assert len(checked) == 1
     assert (progress.total, progress.completed) == (3, 3)

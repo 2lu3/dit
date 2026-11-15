@@ -22,6 +22,7 @@ class IndexEntry:
     inode: int
     hash: str
     pushed_at: str | None = None
+    ctime_ns: int | None = None
 
 
 class StatIndex:
@@ -57,10 +58,15 @@ class StatIndex:
                 mtime_ns INTEGER NOT NULL,
                 inode INTEGER NOT NULL,
                 hash TEXT NOT NULL,
-                pushed_at TEXT
+                pushed_at TEXT,
+                ctime_ns INTEGER
             )
             """
         )
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(entries)")}
+        if "ctime_ns" not in columns:
+            # 旧行は NULL のまま残し、次の確認でハッシュを再計算する。
+            self._conn.execute("ALTER TABLE entries ADD COLUMN ctime_ns INTEGER")
         self._conn.commit()
 
     @contextmanager
@@ -86,7 +92,8 @@ class StatIndex:
     def get(self, path: str) -> IndexEntry | None:
         """パスに対応するインデックスエントリがあれば返す."""
         row = self._conn.execute(
-            "SELECT path, size, mtime_ns, inode, hash, pushed_at FROM entries WHERE path = ?",
+            "SELECT path, size, mtime_ns, inode, hash, pushed_at, ctime_ns "
+            "FROM entries WHERE path = ?",
             (path,),
         ).fetchone()
         if row is None:
@@ -98,20 +105,22 @@ class StatIndex:
             inode=row["inode"],
             hash=row["hash"],
             pushed_at=row["pushed_at"],
+            ctime_ns=row["ctime_ns"],
         )
 
     def upsert(self, entry: IndexEntry) -> None:
         """インデックスエントリを挿入または更新する."""
         self._conn.execute(
             """
-            INSERT INTO entries (path, size, mtime_ns, inode, hash, pushed_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (path, size, mtime_ns, inode, hash, pushed_at, ctime_ns)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(path) DO UPDATE SET
                 size=excluded.size,
                 mtime_ns=excluded.mtime_ns,
                 inode=excluded.inode,
                 hash=excluded.hash,
-                pushed_at=excluded.pushed_at
+                pushed_at=excluded.pushed_at,
+                ctime_ns=excluded.ctime_ns
             """,
             (
                 entry.path,
@@ -120,6 +129,7 @@ class StatIndex:
                 entry.inode,
                 entry.hash,
                 entry.pushed_at,
+                entry.ctime_ns,
             ),
         )
         self._commit_unless_batching()
@@ -140,7 +150,7 @@ class StatIndex:
     def all_entries(self) -> list[IndexEntry]:
         """すべてのインデックスエントリを返す."""
         rows = self._conn.execute(
-            "SELECT path, size, mtime_ns, inode, hash, pushed_at FROM entries"
+            "SELECT path, size, mtime_ns, inode, hash, pushed_at, ctime_ns FROM entries"
         ).fetchall()
         return [
             IndexEntry(
@@ -150,17 +160,23 @@ class StatIndex:
                 inode=row["inode"],
                 hash=row["hash"],
                 pushed_at=row["pushed_at"],
+                ctime_ns=row["ctime_ns"],
             )
             for row in rows
         ]
 
 
-def file_stat_tuple(path: Path) -> tuple[int, int, int]:
-    """ファイルパスの size / mtime_ns / inode を返す."""
+def file_stat_tuple(path: Path) -> tuple[int, int, int, int]:
+    """ファイルパスの size / mtime_ns / inode / ctime_ns を返す."""
     st = path.stat()
-    return (st.st_size, st.st_mtime_ns, getattr(st, "st_ino", 0))
+    return (st.st_size, st.st_mtime_ns, getattr(st, "st_ino", 0), st.st_ctime_ns)
 
 
-def stats_match(entry: IndexEntry, size: int, mtime_ns: int, inode: int) -> bool:
+def stats_match(entry: IndexEntry, size: int, mtime_ns: int, inode: int, ctime_ns: int) -> bool:
     """エントリが指定の file stats と一致するかを返す."""
-    return entry.size == size and entry.mtime_ns == mtime_ns and entry.inode == inode
+    return (
+        entry.size == size
+        and entry.mtime_ns == mtime_ns
+        and entry.inode == inode
+        and entry.ctime_ns == ctime_ns
+    )

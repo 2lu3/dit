@@ -10,7 +10,7 @@ from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING, Any
 
 import boto3
-from boto3.exceptions import RetriesExceededError
+from boto3.exceptions import RetriesExceededError, S3UploadFailedError
 from boto3.s3.transfer import S3Transfer, TransferConfig
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
@@ -21,13 +21,14 @@ from dit.core.hasher import strip_hash_prefix
 from dit.core.remote.base import Remote
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
     from concurrent.futures import Future
 
 MULTIPART_THRESHOLD_BYTES = 8 * 1024 * 1024
 MULTIPART_CHUNKSIZE_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_CONCURRENCY = 16
 HASH_KEY_PART_COUNT = 2
+HASH_KEY_PREFIX_LENGTH = 2
 
 REQUIRED_ENV_VARS = (
     "DIT_ACCESS_KEY",
@@ -94,7 +95,7 @@ class S3Remote(Remote):
         """コンテンツハッシュから S3 オブジェクトキーを構築する."""
         digest = strip_hash_prefix(content_hash)
         prefix = self.remote.prefix.rstrip("/")
-        base = f"files/blake3/{digest[:2]}/{digest[2:]}"
+        base = f"files/blake3/{digest[:HASH_KEY_PREFIX_LENGTH]}/{digest[HASH_KEY_PREFIX_LENGTH:]}"
         return f"{prefix}/{base}" if prefix else base
 
     def exists(self, content_hash: str) -> bool:
@@ -118,33 +119,16 @@ class S3Remote(Remote):
         *,
         on_checked: Callable[[str], None] | None = None,
     ) -> dict[str, bool]:
-        """重複ハッシュをまとめ、上限内で存在確認を並列に実行する."""
+        """対象 prefix の一覧を取得し、重複ハッシュをまとめて存在確認する."""
         hashes = dict.fromkeys(content_hashes)
         if not hashes:
             return {}
-        workers = min(self._transfer.max_concurrency, len(hashes))
-        remaining = iter(hashes)
+        present = set(self.list_hashes())
         results: dict[str, bool] = {}
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            pending: dict[Future[bool], str] = {}
-
-            def submit_batch(count: int) -> None:
-                for content_hash in islice(remaining, count):
-                    pending[executor.submit(self.exists, content_hash)] = content_hash
-
-            try:
-                submit_batch(workers)
-                while pending:
-                    done, _ = wait(pending, return_when=FIRST_COMPLETED)
-                    for future in done:
-                        content_hash = pending.pop(future)
-                        results[content_hash] = future.result()
-                        if on_checked is not None:
-                            on_checked(content_hash)
-                    submit_batch(len(done))
-            finally:
-                for future in pending:
-                    future.cancel()
+        for content_hash in hashes:
+            results[content_hash] = content_hash in present
+            if on_checked is not None:
+                on_checked(content_hash)
         return results
 
     def upload(
@@ -159,6 +143,60 @@ class S3Remote(Remote):
         if self.exists(content_hash):
             return
         self._put_object(local_path, key, progress)
+
+    def upload_many(
+        self,
+        uploads: Iterable[tuple[str, Path]],
+        *,
+        progress: Callable[[int], None] | None = None,
+        on_start: Callable[[Path], None] | None = None,
+        on_uploaded: Callable[[Path], None] | None = None,
+    ) -> None:
+        """未保存の実体を、ファイル間と multipart で転送枠を共有して送信する."""
+        workers = self._transfer.max_concurrency
+        remaining = iter(uploads)
+        with (
+            ThreadPoolExecutor(max_workers=workers) as executor,
+            S3Transfer(client=self._client, config=self._transfer) as transfer,
+        ):
+            pending: dict[Future[None], Path] = {}
+
+            def submit_batch(count: int) -> None:
+                # イテレータ側の検証と DB 操作は、この呼出元スレッドに限定する。
+                for content_hash, path in islice(remaining, count):
+                    if on_start is not None:
+                        on_start(path)
+                    future = executor.submit(
+                        self._upload_file, transfer, path, self.object_key(content_hash), progress
+                    )
+                    pending[future] = path
+
+            try:
+                submit_batch(workers)
+                while pending:
+                    done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        path = pending.pop(future)
+                        future.result()
+                        if on_uploaded is not None:
+                            on_uploaded(path)
+                    submit_batch(len(done))
+            finally:
+                for future in pending:
+                    future.cancel()
+
+    def _upload_file(
+        self,
+        transfer: S3Transfer,
+        local_path: Path,
+        key: str,
+        progress: Callable[[int], None] | None,
+    ) -> None:
+        try:
+            transfer.upload_file(str(local_path), self.remote.bucket, key, callback=progress)
+        except (BotoCoreError, ClientError, S3UploadFailedError, OSError) as exc:
+            msg = f"failed to upload {local_path} to s3://{self.remote.bucket}/{key}: {exc}"
+            raise RemoteError(msg) from exc
 
     def download(
         self,
@@ -256,7 +294,7 @@ class S3Remote(Remote):
                 Config=self._transfer,
                 **_callback_kw(progress),
             )
-        except ClientError as exc:
+        except (BotoCoreError, ClientError, S3UploadFailedError) as exc:
             msg = f"failed to upload {local_path} to s3://{self.remote.bucket}/{key}: {exc}"
             raise RemoteError(msg) from exc
 
@@ -276,12 +314,12 @@ class S3Remote(Remote):
         hashes: list[str] = []
         continuation: str | None = None
         while True:
-            kwargs = {"Bucket": self.remote.bucket, "Prefix": list_prefix}
+            kwargs = {"Bucket": self.remote.bucket, "Prefix": list_prefix, "MaxKeys": 1000}
             if continuation:
                 kwargs["ContinuationToken"] = continuation
             try:
                 resp = self._client.list_objects_v2(**kwargs)
-            except ClientError as exc:
+            except (BotoCoreError, ClientError) as exc:
                 msg = f"failed to list s3://{self.remote.bucket}/{list_prefix}: {exc}"
                 raise RemoteError(msg) from exc
             for obj in resp.get("Contents") or []:
@@ -291,7 +329,11 @@ class S3Remote(Remote):
                     hashes.append(f"blake3:{digest}")
             if not resp.get("IsTruncated"):
                 break
-            continuation = resp.get("NextContinuationToken")
+            next_token = resp.get("NextContinuationToken")
+            if not next_token or next_token == continuation:
+                msg = f"incomplete object listing for s3://{self.remote.bucket}/{list_prefix}"
+                raise RemoteError(msg)
+            continuation = next_token
         return hashes
 
 
@@ -306,7 +348,7 @@ def _digest_from_key(key: str, list_prefix: str) -> str | None:
         return None
     rest = key[len(list_prefix) :]
     parts = rest.split("/")
-    if len(parts) != HASH_KEY_PART_COUNT:
+    if len(parts) != HASH_KEY_PART_COUNT or len(parts[0]) != HASH_KEY_PREFIX_LENGTH or not parts[1]:
         return None
     return parts[0] + parts[1]
 
